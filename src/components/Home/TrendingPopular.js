@@ -31,7 +31,7 @@ export default function TrendingPopular() {
             <p className="text-xs font-bold uppercase tracking-widest text-white/70 mb-2">This Week</p>
             <h2 className="text-3xl font-extrabold text-white mb-4">Trending</h2>
             <Link
-              href="/products"
+              href="/featured"
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-(--primary) text-(--accent) font-bold text-sm rounded-sm hover:bg-white transition-colors"
             >
               Shop Now →
@@ -47,7 +47,7 @@ export default function TrendingPopular() {
             <p className="text-xs font-bold uppercase tracking-widest text-white/70 mb-2">Most Loved</p>
             <h2 className="text-3xl font-extrabold text-white mb-4">Popular</h2>
             <Link
-              href="/products"
+              href="/featured"
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-(--secondary) text-white font-bold text-sm rounded-sm hover:bg-(--accent) transition-colors"
             >
               Shop Now →
