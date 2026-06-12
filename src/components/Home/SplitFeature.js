@@ -5,7 +5,8 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Link from "next/link";
 import { FaCheck } from "react-icons/fa";
-import { getAllCategories } from "@/routes/category.routes";
+import useCategoryStore from "@/store/category.store";
+import { useCategory } from "@/hooks/useCategory";
 
 function SplitBlock({ cat, reverse, index }) {
   const blockRef = useRef(null);
@@ -81,12 +82,11 @@ function SplitBlock({ cat, reverse, index }) {
 }
 
 export default function SplitFeature() {
-  const [categories, setCategories] = useState([]);
+  const categories = useCategoryStore((s) => s.categories).slice(0, 2);
+  const { fetchCategories } = useCategory();
 
   useEffect(() => {
-    getAllCategories({ limit: 2 })
-      .then((d) => setCategories(d.categories || []))
-      .catch(() => {});
+    fetchCategories({ limit: 2 });
   }, []);
 
   if (categories.length === 0) return null;

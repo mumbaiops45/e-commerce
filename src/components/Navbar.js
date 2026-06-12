@@ -14,7 +14,8 @@ import { BsGrid3X3Gap } from "react-icons/bs";
 import { MdDashboard } from "react-icons/md";
 import useAuthStore from "@/store/auth.store";
 import { logoutUser } from "@/routes/auth.routes";
-import { getAllCategories } from "@/routes/category.routes";
+import useCategoryStore from "@/store/category.store";
+import { useCategory } from "@/hooks/useCategory";
 
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -22,7 +23,6 @@ export default function Navbar() {
   const [hoverCat, setHoverCat] = useState(0);
   const [mobileExpandCat, setMobileExpandCat] = useState(null);
   const [slideOpen, setSlideOpen] = useState(false);
-  const [navCategories, setNavCategories] = useState([]);
 
   const closeTimer = useRef(null);
   const router = useRouter();
@@ -30,11 +30,11 @@ export default function Navbar() {
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const logout = useAuthStore((s) => s.logout);
+  const navCategories = useCategoryStore((s) => s.categories);
+  const { fetchCategories } = useCategory();
 
   useEffect(() => {
-    getAllCategories({ limit: 20 })
-      .then((d) => setNavCategories(d.categories || []))
-      .catch(() => {});
+    fetchCategories({ limit: 20 });
   }, []);
 
   const openMenu = () => { clearTimeout(closeTimer.current); setCatOpen(true); };

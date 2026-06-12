@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import useAuthStore from "@/store/auth.store";
 import { logoutUser } from "@/routes/auth.routes";
-import { getAllCategories, createCategory, updateCategory, deleteCategory } from "@/routes/category.routes";
-import { getAllProducts, createProduct, updateProduct, deleteProduct } from "@/routes/product.routes";
+import useCategoryStore from "@/store/category.store";
+import useProductStore from "@/store/product.store";
+import { useCategory } from "@/hooks/useCategory";
+import { useProduct } from "@/hooks/useProduct";
 import {
   FaUser, FaBoxOpen, FaShoppingCart, FaHeart, FaCog, FaBars, FaTimes,
   FaPlus, FaEdit, FaTrash, FaEye, FaChevronDown, FaSignOutAlt,
@@ -491,7 +493,8 @@ function SectionHeader({ title, count, buttonLabel, onAction }) {
 
 // ─── Manage Categories ────────────────────────────────────────
 function ManageCategories() {
-  const [rows, setRows] = useState([]);
+  const rows = useCategoryStore((s) => s.categories);
+  const { fetchCategories, addCategory, editCategory, removeCategory } = useCategory();
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [sel, setSel] = useState(null);
@@ -502,24 +505,22 @@ function ManageCategories() {
   const closeModal = () => { setModal(null); setSel(null); };
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setRows((await getAllCategories({ limit: 100 })).categories || []); }
-    catch { setRows([]); }
-    finally { setLoading(false); }
+    await fetchCategories({ limit: 100 });
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   const handleSave = async (form) => {
-    if (sel) { await updateCategory(sel._id, form); showToast("Category updated"); }
-    else { await createCategory(form); showToast("Category created"); }
+    if (sel) { await editCategory(sel._id, form); showToast("Category updated"); }
+    else { await addCategory(form); showToast("Category created"); }
     closeModal();
-    load();
+    fetchCategories({ limit: 100 });
   };
 
   const handleDelete = async () => {
     setDeleting(true);
-    try { await deleteCategory(sel._id); showToast("Category deleted"); closeModal(); load(); }
+    try { await removeCategory(sel._id); showToast("Category deleted"); closeModal(); fetchCategories({ limit: 100 }); }
     finally { setDeleting(false); }
   };
 
@@ -637,8 +638,10 @@ function ManageCategories() {
 
 // ─── Manage Products ──────────────────────────────────────────
 function ManageProducts() {
-  const [rows, setRows] = useState([]);
-  const [cats, setCats] = useState([]);
+  const rows = useProductStore((s) => s.products);
+  const cats = useCategoryStore((s) => s.categories);
+  const { fetchProducts, addProduct, editProduct, removeProduct } = useProduct();
+  const { fetchCategories } = useCategory();
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [sel, setSel] = useState(null);
@@ -649,27 +652,22 @@ function ManageProducts() {
   const closeModal = () => { setModal(null); setSel(null); };
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [pd, cd] = await Promise.all([getAllProducts({ limit: 100 }), getAllCategories({ limit: 100 })]);
-      setRows(pd.products || []);
-      setCats(cd.categories || []);
-    } catch { setRows([]); }
-    finally { setLoading(false); }
+    await Promise.all([fetchProducts({ limit: 100 }), fetchCategories({ limit: 100 })]);
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   const handleSave = async (form) => {
-    if (sel) { await updateProduct(sel._id, form); showToast("Product updated"); }
-    else { await createProduct(form); showToast("Product created"); }
+    if (sel) { await editProduct(sel._id, form); showToast("Product updated"); }
+    else { await addProduct(form); showToast("Product created"); }
     closeModal();
-    load();
+    fetchProducts({ limit: 100 });
   };
 
   const handleDelete = async () => {
     setDeleting(true);
-    try { await deleteProduct(sel._id); showToast("Product deleted"); closeModal(); load(); }
+    try { await removeProduct(sel._id); showToast("Product deleted"); closeModal(); fetchProducts({ limit: 100 }); }
     finally { setDeleting(false); }
   };
 
@@ -802,35 +800,20 @@ function ManageProducts() {
 
 // ─── Create Category (standalone) ────────────────────────────
 function CreateCategorySection() {
-  const [form, setForm] = useState({ name: "", description: "", image: "" });
-  const [error, setError] = useState("");
+  const { addCategory, fetchCategories } = useCategory();
   const [success, setSuccess] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError(""); setSaving(true);
-    try {
-      await createCategory(form);
-      setSuccess("Category created successfully!");
-      setForm({ name: "", description: "", image: "" });
-      setTimeout(() => setSuccess(""), 3000);
-    } catch (err) {
-      setError(err?.response?.data?.errors?.[0]?.message || err?.response?.data?.message || "Create failed");
-    } finally { setSaving(false); }
-  };
 
   return (
     <div>
       <SectionHeader title="Create Category" />
       <div className="px-6 py-6 max-w-xl">
-        {error && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 mb-4">{error}</div>}
         {success && <div className="flex items-center gap-2 text-green-700 text-sm bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 mb-4"><FaCheck className="text-xs" /> {success}</div>}
         <div className="bg-white rounded-2xl border border-(--border-light) p-6">
           <CategoryForm
             initial={null}
             onSave={async (form) => {
-              await createCategory(form);
+              await addCategory(form);
+              await fetchCategories({ limit: 100 });
               setSuccess("Category created successfully!");
               setTimeout(() => setSuccess(""), 3000);
             }}
@@ -844,11 +827,13 @@ function CreateCategorySection() {
 
 // ─── Create Product (standalone) ─────────────────────────────
 function CreateProductSection() {
-  const [cats, setCats] = useState([]);
+  const cats = useCategoryStore((s) => s.categories);
+  const { fetchCategories } = useCategory();
+  const { addProduct, fetchProducts } = useProduct();
   const [success, setSuccess] = useState("");
 
   useEffect(() => {
-    getAllCategories({ limit: 100 }).then((d) => setCats(d.categories || [])).catch(() => {});
+    if (cats.length === 0) fetchCategories({ limit: 100 });
   }, []);
 
   return (
@@ -861,7 +846,8 @@ function CreateProductSection() {
             initial={null}
             categories={cats}
             onSave={async (form) => {
-              await createProduct(form);
+              await addProduct(form);
+              await fetchProducts({ limit: 100 });
               setSuccess("Product created successfully!");
               setTimeout(() => setSuccess(""), 3000);
             }}

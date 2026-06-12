@@ -5,42 +5,41 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Link from "next/link";
 import { FaHeart, FaShoppingCart, FaStar, FaRegHeart } from "react-icons/fa";
-import { getAllProducts } from "@/routes/product.routes";
-import { getAllCategories } from "@/routes/category.routes";
+import useProductStore from "@/store/product.store";
+import useCategoryStore from "@/store/category.store";
+import { useProduct } from "@/hooks/useProduct";
+import { useCategory } from "@/hooks/useCategory";
 
 export default function ProductGrid() {
   const sectionRef = useRef(null);
   const gridRef = useRef(null);
-  const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [activeTab, setActiveTab] = useState("All");
   const [wishlisted, setWishlisted] = useState({});
   const [loading, setLoading] = useState(true);
 
-  // Fetch categories for tabs
+  const products = useProductStore((s) => s.products);
+  const categories = useCategoryStore((s) => s.categories);
+  const { fetchProducts: fetchProds } = useProduct();
+  const { fetchCategories } = useCategory();
+
   useEffect(() => {
-    getAllCategories({ limit: 20 })
-      .then((d) => setCategories(d.categories || []))
-      .catch(() => {});
+    fetchCategories({ limit: 20 });
   }, []);
 
-  const fetchProducts = useCallback((categoryId) => {
+  const loadProducts = useCallback((categoryId) => {
     setLoading(true);
     const params = { limit: 8 };
     if (categoryId) params.category = categoryId;
-    getAllProducts(params)
-      .then((d) => setProducts(d.products || []))
-      .catch(() => setProducts([]))
-      .finally(() => setLoading(false));
+    fetchProds(params).finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    fetchProducts(null);
-  }, [fetchProducts]);
+    loadProducts(null);
+  }, [loadProducts]);
 
   const handleTabChange = (tab, catId) => {
     setActiveTab(tab);
-    fetchProducts(catId || null);
+    loadProducts(catId || null);
   };
 
   useEffect(() => {

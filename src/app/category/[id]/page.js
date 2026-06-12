@@ -4,13 +4,15 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { FaHeart, FaRegHeart, FaShoppingCart, FaStar, FaChevronLeft, FaFilter } from "react-icons/fa";
 import { getCategoryById } from "@/routes/category.routes";
-import { getProductsByCategory } from "@/routes/product.routes";
+import useProductStore from "@/store/product.store";
+import { useProduct } from "@/hooks/useProduct";
 
 export default function CategoryPage({ params }) {
   const { id } = use(params);
 
+  const products = useProductStore((s) => s.products);
+  const { fetchProductsByCategory } = useProduct();
   const [category, setCategory] = useState(null);
-  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [wishlisted, setWishlisted] = useState({});
   const [sort, setSort] = useState("createdAt");
@@ -25,12 +27,8 @@ export default function CategoryPage({ params }) {
 
   useEffect(() => {
     setLoading(true);
-    getProductsByCategory(id, { sort, page, limit: 12 })
-      .then((d) => {
-        setProducts(d.products || []);
-        setPagination(d.pagination || null);
-      })
-      .catch(() => setProducts([]))
+    fetchProductsByCategory(id, { sort, page, limit: 12 })
+      .then((d) => setPagination(d?.pagination || null))
       .finally(() => setLoading(false));
   }, [id, sort, page]);
 

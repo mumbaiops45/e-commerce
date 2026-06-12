@@ -5,7 +5,8 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Link from "next/link";
 import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
-import { getAllCategories } from "@/routes/category.routes";
+import useCategoryStore from "@/store/category.store";
+import { useCategory } from "@/hooks/useCategory";
 
 const CARD_WIDTH = 220;
 const GAP = 16;
@@ -14,14 +15,13 @@ export default function ShopByCategory() {
   const sectionRef = useRef(null);
   const trackRef = useRef(null);
   const [offset, setOffset] = useState(0);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+
+  const categories = useCategoryStore((s) => s.categories);
+  const { fetchCategories } = useCategory();
+  const [loading, setLoading] = useState(() => categories.length === 0);
 
   useEffect(() => {
-    getAllCategories({ limit: 20 })
-      .then((d) => setCategories(d.categories || []))
-      .catch(() => setCategories([]))
-      .finally(() => setLoading(false));
+    fetchCategories({ limit: 20 }).finally(() => setLoading(false));
   }, []);
 
   const maxOffset = Math.max(

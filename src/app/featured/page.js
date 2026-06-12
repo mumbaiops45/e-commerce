@@ -3,18 +3,17 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FaHeart, FaRegHeart, FaShoppingCart, FaStar, FaChevronLeft } from "react-icons/fa";
-import { getAllProducts } from "@/routes/product.routes";
+import useProductStore from "@/store/product.store";
+import { useProduct } from "@/hooks/useProduct";
 
 export default function FeaturedPage() {
-  const [products, setProducts] = useState([]);
+  const products = useProductStore((s) => s.products);
+  const { fetchProducts } = useProduct();
   const [loading, setLoading] = useState(true);
   const [wishlisted, setWishlisted] = useState({});
 
   useEffect(() => {
-    getAllProducts({ isFeatured: true, limit: 50 })
-      .then((d) => setProducts(d.products || []))
-      .catch(() => setProducts([]))
-      .finally(() => setLoading(false));
+    fetchProducts({ isFeatured: true, limit: 50 }).finally(() => setLoading(false));
   }, []);
 
   const toggleWish = (id) => setWishlisted((prev) => ({ ...prev, [id]: !prev[id] }));

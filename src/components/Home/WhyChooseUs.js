@@ -91,12 +91,14 @@ export default function WhyChooseUs() {
         opacity: 0, y: 30, stagger: 0.07, duration: 0.55, ease: "power2.out",
         scrollTrigger: { trigger: sectionRef.current, start: "top 75%" },
       });
+    }, sectionRef);
+    const ctx2 = gsap.context(() => {
       gsap.from(".trust-el", {
         opacity: 0, y: 25, stagger: 0.1, duration: 0.6, ease: "power2.out",
         scrollTrigger: { trigger: trustRef.current, start: "top 80%" },
       });
-    }, sectionRef);
-    return () => ctx.revert();
+    }, trustRef);
+    return () => { ctx.revert(); ctx2.revert(); };
   }, []);
 
   return (
