@@ -16,6 +16,8 @@ import useAuthStore from "@/store/auth.store";
 import { logoutUser } from "@/routes/auth.routes";
 import useCategoryStore from "@/store/category.store";
 import { useCategory } from "@/hooks/useCategory";
+import useCartStore from "@/store/cart.store";
+import { useCart } from "@/hooks/useCart";
 
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -32,10 +34,19 @@ export default function Navbar() {
   const logout = useAuthStore((s) => s.logout);
   const navCategories = useCategoryStore((s) => s.categories);
   const { fetchCategories } = useCategory();
+  const cartItems = useCartStore((s) => s.items);
+  const { fetchCart } = useCart();
+
+  const cartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const isUser = user?.role === "user";
 
   useEffect(() => {
     fetchCategories({ limit: 20 });
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated && isUser) fetchCart();
+  }, [isAuthenticated]);
 
   const openMenu = () => { clearTimeout(closeTimer.current); setCatOpen(true); };
   const closeMenu = () => {
@@ -127,10 +138,14 @@ export default function Navbar() {
             <span className="absolute -top-2 -right-3 bg-[var(--secondary)] text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center">0</span>
           </button>
 
-          <button className="flex items-center gap-1.5 group relative">
+          <button className="flex items-center gap-1.5 group relative" onClick={() => router.push("/user/dashboard?tab=cart")}>
             <HiOutlineShoppingCart className="text-lg group-hover:text-[var(--secondary)] transition-colors" />
             <span className="text-[11px] font-medium hidden sm:block group-hover:text-[var(--secondary)] transition-colors">Cart</span>
-            <span className="absolute -top-2 -right-3 bg-[var(--secondary)] text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center">0</span>
+            {isUser && cartCount > 0 && (
+              <span className="absolute -top-2 -right-3 bg-[var(--secondary)] text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center">
+                {cartCount > 99 ? "99+" : cartCount}
+              </span>
+            )}
           </button>
 
           <button className="md:hidden text-lg" onClick={() => setMobileOpen(!mobileOpen)}>
@@ -310,7 +325,13 @@ export default function Navbar() {
             {/* Links */}
             <div className="flex-1 py-4 px-4 space-y-1">
               <Link
-                href="/account"
+                href={
+                  user?.role === "superadmin"
+                    ? "/superadmin/dashboard"
+                    : user?.role === "admin"
+                    ? "/admin/dashboard"
+                    : "/user/dashboard"
+                }
                 onClick={() => setSlideOpen(false)}
                 className="flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-semibold text-[var(--accent)] hover:bg-[var(--surface-warm)] transition-colors group"
               >
@@ -318,8 +339,8 @@ export default function Navbar() {
                   <MdDashboard className="text-base" />
                 </span>
                 <div>
-                  <p className="leading-none">Profile</p>
-                  <p className="text-[11px] text-gray-400 font-normal mt-0.5">View your dashboard</p>
+                  <p className="leading-none">Dashboard</p>
+                  <p className="text-[11px] text-gray-400 font-normal mt-0.5 capitalize">{user?.role || "user"} panel</p>
                 </div>
               </Link>
             </div>

@@ -2,19 +2,22 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import useAuthStore from "@/store/auth.store";
 import { logoutUser } from "@/routes/auth.routes";
 import useCategoryStore from "@/store/category.store";
 import useProductStore from "@/store/product.store";
+import useCartStore from "@/store/cart.store";
 import { useCategory } from "@/hooks/useCategory";
 import { useProduct } from "@/hooks/useProduct";
+import { useCart } from "@/hooks/useCart";
 import {
   FaUser, FaBoxOpen, FaShoppingCart, FaHeart, FaCog, FaBars, FaTimes,
   FaPlus, FaEdit, FaTrash, FaEye, FaChevronDown, FaSignOutAlt,
   FaTag, FaCheck, FaImage, FaTruck, FaExclamationTriangle, FaList,
+  FaUsers, FaUserShield, FaSearch, FaBan, FaUnlock,
 } from "react-icons/fa";
-import { MdDashboard } from "react-icons/md";
+import api from "@/lib/axios";
+import { getMyOrders, getAllOrdersAdmin } from "@/routes/order.routes";
 
 const isAdminRole = (role) => role === "admin" || role === "superadmin";
 
@@ -105,7 +108,17 @@ function Sidebar({ user, activeTab, onTabChange, onLogout, mobileOpen, onMobileC
               </div>
             )}
 
-            <NavItem id="orders" icon={<FaTruck className="text-xs shrink-0" />} label="Orders" />
+            {user?.role === "superadmin" && (
+              <>
+                <NavItem id="orders" icon={<FaTruck className="text-xs shrink-0" />} label="Orders" />
+                <NavItem id="user-management" icon={<FaUsers className="text-xs shrink-0" />} label="Users" />
+                <NavItem id="admin-management" icon={<FaUserShield className="text-xs shrink-0" />} label="Admins" />
+              </>
+            )}
+
+            {user?.role === "admin" && (
+              <NavItem id="orders" icon={<FaTruck className="text-xs shrink-0" />} label="Orders" />
+            )}
           </>
         )}
 
@@ -472,9 +485,9 @@ function Toast({ message }) {
 // ─── Section header (sticky) ──────────────────────────────────
 function SectionHeader({ title, count, buttonLabel, onAction }) {
   return (
-    <div className="sticky top-0 z-10 bg-white border-b border-(--border-light) px-6 py-4 flex items-center justify-between">
-      <div>
-        <h2 className="text-xl font-bold text-(--accent)">{title}</h2>
+    <div className="sticky top-0 z-10 bg-white border-b border-(--border-light) px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="min-w-0">
+        <h2 className="text-lg sm:text-xl font-bold text-(--accent) truncate">{title}</h2>
         {count !== undefined && (
           <p className="text-xs text-gray-500 mt-0.5">{count} {count === 1 ? "item" : "items"} total</p>
         )}
@@ -482,7 +495,7 @@ function SectionHeader({ title, count, buttonLabel, onAction }) {
       {buttonLabel && (
         <button
           onClick={onAction}
-          className="flex items-center gap-2 px-4 py-2.5 bg-(--accent) text-white text-sm font-semibold rounded-lg hover:bg-(--secondary) transition-colors shadow-sm"
+          className="flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-(--accent) text-white text-xs sm:text-sm font-semibold rounded-lg hover:bg-(--secondary) transition-colors shadow-sm shrink-0"
         >
           <FaPlus className="text-xs" /> {buttonLabel}
         </button>
@@ -859,6 +872,848 @@ function CreateProductSection() {
   );
 }
 
+// ─── Pagination bar ───────────────────────────────────────────
+function Pagination({ page, totalPages, onPage }) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-center gap-3 mt-5">
+      <button onClick={() => onPage(Math.max(1, page - 1))} disabled={page === 1}
+        className="px-4 py-1.5 text-xs font-semibold border border-(--border-light) rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+        ← Prev
+      </button>
+      <span className="text-sm text-gray-500 font-medium">Page {page} of {totalPages}</span>
+      <button onClick={() => onPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}
+        className="px-4 py-1.5 text-xs font-semibold border border-(--border-light) rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+        Next →
+      </button>
+    </div>
+  );
+}
+
+// ─── My Orders (user) ────────────────────────────────────────
+function MyOrdersTab() {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+  const [page, setPage] = useState(1);
+  const PER_PAGE = 5;
+
+  useEffect(() => {
+    getMyOrders()
+      .then((d) => setOrders(d.orders || []))
+      .catch(() => setError("Failed to load orders. Please try again."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const totalPages = Math.ceil(orders.length / PER_PAGE);
+  const paged = orders.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
+  const SC = {
+    pending: "bg-amber-100 text-amber-700",
+    processing: "bg-blue-100 text-blue-700",
+    shipped: "bg-purple-100 text-purple-700",
+    delivered: "bg-green-100 text-green-700",
+    cancelled: "bg-red-100 text-red-600",
+  };
+  const PC = {
+    pending: "bg-amber-100 text-amber-700",
+    paid: "bg-green-100 text-green-700",
+    failed: "bg-red-100 text-red-600",
+  };
+
+  return (
+    <div>
+      <SectionHeader title="My Orders" count={orders.length} />
+      <div className="px-6 py-4">
+        {loading ? (
+          <div className="space-y-3">
+            {[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-gray-100 rounded-xl animate-pulse" />)}
+          </div>
+        ) : error ? (
+          <p className="text-red-500 text-sm text-center py-10">{error}</p>
+        ) : orders.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400">
+            <FaBoxOpen className="text-4xl mb-3" />
+            <p className="font-semibold text-gray-600">No orders yet</p>
+            <p className="text-sm mt-1">Your orders will appear here after checkout.</p>
+          </div>
+        ) : (
+          <>
+            <div className="space-y-3">
+              {paged.map((order) => (
+                <div key={order._id} className="bg-white border border-(--border-light) rounded-xl overflow-hidden">
+                  <button
+                    className="w-full flex items-center gap-4 px-4 py-4 hover:bg-(--surface-warm) transition-colors text-left"
+                    onClick={() => setExpandedId(expandedId === order._id ? null : order._id)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-bold text-(--accent)">#{order._id.slice(-8).toUpperCase()}</p>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold capitalize ${SC[order.orderStatus] || "bg-gray-100 text-gray-600"}`}>
+                          {order.orderStatus}
+                        </span>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold capitalize ${PC[order.paymentStatus] || "bg-gray-100 text-gray-600"}`}>
+                          {order.paymentStatus}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {new Date(order.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        {" · "}{order.items?.length || 0} item{order.items?.length !== 1 ? "s" : ""}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end shrink-0">
+                      <p className="text-sm font-bold text-(--accent)">₹{order.totalAmount?.toLocaleString()}</p>
+                      <FaChevronDown className={`text-[10px] text-gray-400 mt-1 transition-transform ${expandedId === order._id ? "rotate-180" : ""}`} />
+                    </div>
+                  </button>
+
+                  {expandedId === order._id && (
+                    <div className="border-t border-(--border-light) px-4 py-4 space-y-3">
+                      <div className="p-3 bg-(--surface-warm) rounded-xl text-xs text-gray-600">
+                        <p className="font-semibold text-(--accent) mb-1.5">Delivery Address</p>
+                        <p className="font-semibold">{order.shippingAddress?.name}</p>
+                        <p>{order.shippingAddress?.address}, {order.shippingAddress?.city}</p>
+                        <p>{order.shippingAddress?.state} – {order.shippingAddress?.pincode}</p>
+                        <p className="mt-0.5">Ph: {order.shippingAddress?.phone}</p>
+                      </div>
+                      <div className="space-y-2.5">
+                        {order.items?.map((item, idx) => (
+                          <div key={idx} className="flex gap-3 items-center">
+                            <div className="w-11 h-11 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                              {item.image
+                                ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                                : <div className="w-full h-full flex items-center justify-center text-gray-400"><FaImage className="text-xs" /></div>
+                              }
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-(--accent) line-clamp-1">{item.name}</p>
+                              <p className="text-xs text-gray-400">Qty: {item.quantity} × ₹{item.price?.toLocaleString()}</p>
+                            </div>
+                            <p className="text-xs font-bold text-gray-700 shrink-0">
+                              ₹{(item.price * item.quantity).toLocaleString()}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <Pagination page={page} totalPages={totalPages} onPage={setPage} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Admin Orders (admin/superadmin) ─────────────────────────
+function AdminOrdersTab() {
+  const [orders, setOrders] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [orderStatus, setOrderStatus] = useState("");
+  const [payStatus, setPayStatus] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = { page, limit: 10 };
+      if (search) params.search = search;
+      if (orderStatus) params.orderStatus = orderStatus;
+      if (payStatus) params.paymentStatus = payStatus;
+      const data = await getAllOrdersAdmin(params);
+      setOrders(data.orders || []);
+      setTotal(data.total || 0);
+      setTotalPages(data.totalPages || 1);
+    } catch {
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, search, orderStatus, payStatus]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const SC = {
+    pending: "bg-amber-100 text-amber-700",
+    processing: "bg-blue-100 text-blue-700",
+    shipped: "bg-purple-100 text-purple-700",
+    delivered: "bg-green-100 text-green-700",
+    cancelled: "bg-red-100 text-red-600",
+  };
+  const PC = {
+    pending: "bg-amber-100 text-amber-700",
+    paid: "bg-green-100 text-green-700",
+    failed: "bg-red-100 text-red-600",
+  };
+
+  return (
+    <div>
+      <SectionHeader title="All Orders" count={total} />
+      <div className="px-6 py-4 space-y-4">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <form
+            onSubmit={(e) => { e.preventDefault(); setSearch(searchInput); setPage(1); }}
+            className="flex-1 flex gap-2"
+          >
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by user name or email…"
+              className="flex-1 border border-(--border-light) rounded-lg px-4 py-2 text-sm outline-none focus:border-(--secondary) transition-all" />
+            <button type="submit"
+              className="px-4 py-2 bg-(--accent) text-white text-sm font-semibold rounded-lg hover:bg-(--secondary) transition-colors flex items-center gap-1.5">
+              <FaSearch className="text-xs" /> Search
+            </button>
+          </form>
+          <div className="flex gap-2">
+            <select value={orderStatus} onChange={(e) => { setOrderStatus(e.target.value); setPage(1); }}
+              className="border border-(--border-light) rounded-lg px-3 py-2 text-sm outline-none focus:border-(--secondary) transition-all bg-white">
+              <option value="">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="processing">Processing</option>
+              <option value="shipped">Shipped</option>
+              <option value="delivered">Delivered</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            <select value={payStatus} onChange={(e) => { setPayStatus(e.target.value); setPage(1); }}
+              className="border border-(--border-light) rounded-lg px-3 py-2 text-sm outline-none focus:border-(--secondary) transition-all bg-white">
+              <option value="">All Payments</option>
+              <option value="pending">Pending</option>
+              <option value="paid">Paid</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="space-y-3">
+            {[...Array(5)].map((_, i) => <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}
+          </div>
+        ) : orders.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400">
+            <FaTruck className="text-4xl mb-3" />
+            <p className="font-semibold text-gray-600">No orders found</p>
+            <p className="text-sm mt-1">Try adjusting the filters above.</p>
+          </div>
+        ) : (
+          <>
+            <div className="space-y-3">
+              {orders.map((order) => (
+                <div key={order._id} className="bg-white border border-(--border-light) rounded-xl overflow-hidden">
+                  <button
+                    className="w-full flex items-center gap-4 px-4 py-4 hover:bg-(--surface-warm) transition-colors text-left"
+                    onClick={() => setExpandedId(expandedId === order._id ? null : order._id)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-bold text-(--accent)">#{order._id.slice(-8).toUpperCase()}</p>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold capitalize ${SC[order.orderStatus] || "bg-gray-100 text-gray-600"}`}>
+                          {order.orderStatus}
+                        </span>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold capitalize ${PC[order.paymentStatus] || "bg-gray-100 text-gray-600"}`}>
+                          {order.paymentStatus}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {order.user?.name || "—"} · {order.user?.email || "—"} · {" "}
+                        {new Date(order.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end shrink-0">
+                      <p className="text-sm font-bold text-(--accent)">₹{order.totalAmount?.toLocaleString()}</p>
+                      <FaChevronDown className={`text-[10px] text-gray-400 mt-1 transition-transform ${expandedId === order._id ? "rotate-180" : ""}`} />
+                    </div>
+                  </button>
+
+                  {expandedId === order._id && (
+                    <div className="border-t border-(--border-light) px-4 py-4 space-y-3">
+                      <div className="p-3 bg-(--surface-warm) rounded-xl text-xs text-gray-600">
+                        <p className="font-semibold text-(--accent) mb-1.5">Delivery Address</p>
+                        <p className="font-semibold">{order.shippingAddress?.name}</p>
+                        <p>{order.shippingAddress?.address}, {order.shippingAddress?.city}</p>
+                        <p>{order.shippingAddress?.state} – {order.shippingAddress?.pincode}</p>
+                        <p className="mt-0.5">Ph: {order.shippingAddress?.phone}</p>
+                      </div>
+                      <div className="space-y-2.5">
+                        {order.items?.map((item, idx) => (
+                          <div key={idx} className="flex gap-3 items-center">
+                            <div className="w-11 h-11 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                              {item.image
+                                ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                                : <div className="w-full h-full flex items-center justify-center text-gray-400"><FaImage className="text-xs" /></div>
+                              }
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-(--accent) line-clamp-1">{item.name}</p>
+                              <p className="text-xs text-gray-400">Qty: {item.quantity} × ₹{item.price?.toLocaleString()}</p>
+                            </div>
+                            <p className="text-xs font-bold text-gray-700 shrink-0">
+                              ₹{(item.price * item.quantity).toLocaleString()}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <Pagination page={page} totalPages={totalPages} onPage={setPage} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── User Management (superadmin) ────────────────────────────
+function UserManagementTab() {
+  const [users, setUsers] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [togglingId, setTogglingId] = useState(null);
+  const [toast, setToast] = useState("");
+  const [viewUser, setViewUser] = useState(null);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = { page, limit: 10, role: "user" };
+      if (search) params.search = search;
+      const res = await api.get("/users", { params });
+      setUsers(res.data.users || []);
+      setTotal(res.data.total || 0);
+      setTotalPages(res.data.totalPages || 1);
+    } catch {
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, search]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleToggleBlock = async (userId) => {
+    setTogglingId(userId);
+    try {
+      const res = await api.put(`/users/${userId}/block`);
+      showToast(res.data.message || "Updated");
+      load();
+    } catch {
+      showToast("Failed to update user");
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  return (
+    <div>
+      <SectionHeader title="User Management" count={total} />
+      <div className="px-6 py-4 space-y-4">
+        <form onSubmit={(e) => { e.preventDefault(); setSearch(searchInput); setPage(1); }} className="flex gap-2">
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search by name or email…"
+            className="flex-1 border border-(--border-light) rounded-lg px-4 py-2 text-sm outline-none focus:border-(--secondary) transition-all" />
+          <button type="submit"
+            className="px-4 py-2 bg-(--accent) text-white text-sm font-semibold rounded-lg hover:bg-(--secondary) transition-colors flex items-center gap-1.5">
+            <FaSearch className="text-xs" /> Search
+          </button>
+        </form>
+
+        {loading ? (
+          <div className="space-y-3">
+            {[...Array(5)].map((_, i) => <div key={i} className="h-14 bg-gray-100 rounded-lg animate-pulse" />)}
+          </div>
+        ) : users.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400">
+            <FaUsers className="text-4xl mb-3" />
+            <p className="font-semibold text-gray-600">No users found</p>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px]">
+                <thead>
+                  <tr className="border-b border-(--border-light)">
+                    {["Name", "Email", "Phone", "Status", "Joined", "Actions"].map((h) => (
+                      <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider pb-3 px-3 first:pl-0 last:pr-0">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-light)]">
+                  {users.map((u) => (
+                    <tr key={u._id} className="hover:bg-(--surface-warm) transition-colors">
+                      <td className="py-3.5 px-3 pl-0">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-(--accent) text-white text-xs font-bold flex items-center justify-center shrink-0">
+                            {u.name?.charAt(0).toUpperCase()}
+                          </div>
+                          <span className="text-sm font-semibold text-(--accent)">{u.name}</span>
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-3"><span className="text-sm text-gray-600">{u.email}</span></td>
+                      <td className="py-3.5 px-3"><span className="text-sm text-gray-600">{u.phone || "—"}</span></td>
+                      <td className="py-3.5 px-3">
+                        <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${u.isBlocked ? "bg-red-100 text-red-600" : "bg-green-100 text-green-700"}`}>
+                          {u.isBlocked ? "Blocked" : "Active"}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-3">
+                        <span className="text-xs text-gray-500">
+                          {new Date(u.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-3 pr-0">
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => setViewUser(u)}
+                            className="w-8 h-8 rounded-lg bg-blue-50 text-blue-500 hover:bg-blue-100 flex items-center justify-center transition-colors" title="View">
+                            <FaEye className="text-xs" />
+                          </button>
+                          <button onClick={() => handleToggleBlock(u._id)} disabled={togglingId === u._id}
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors disabled:opacity-50 ${u.isBlocked ? "bg-green-50 text-green-600 hover:bg-green-100" : "bg-red-50 text-red-500 hover:bg-red-100"}`}
+                            title={u.isBlocked ? "Unblock" : "Block"}>
+                            {u.isBlocked ? <FaUnlock className="text-xs" /> : <FaBan className="text-xs" />}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination page={page} totalPages={totalPages} onPage={setPage} />
+          </>
+        )}
+      </div>
+
+      {viewUser && (
+        <Modal title="User Details" onClose={() => setViewUser(null)}>
+          <div className="space-y-3 mb-5">
+            {[
+              ["Name", viewUser.name],
+              ["Email", viewUser.email],
+              ["Phone", viewUser.phone || "—"],
+              ["Status", viewUser.isBlocked ? "Blocked" : "Active"],
+              ["Role", viewUser.role],
+              ["Joined", new Date(viewUser.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })],
+            ].map(([l, v]) => (
+              <div key={l} className="flex gap-3">
+                <span className="text-xs font-semibold text-gray-400 w-20 shrink-0 pt-0.5">{l}</span>
+                <span className="text-sm text-(--accent) font-medium flex-1">{v}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={() => setViewUser(null)}
+            className="w-full py-2.5 border border-(--border-light) text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50">
+            Close
+          </button>
+        </Modal>
+      )}
+
+      {toast && <Toast message={toast} />}
+    </div>
+  );
+}
+
+// ─── Admin Management (superadmin) ───────────────────────────
+function AdminManagementTab() {
+  const [admins, setAdmins] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [toast, setToast] = useState("");
+  const [modal, setModal] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [togglingId, setTogglingId] = useState(null);
+  const [form, setForm] = useState({ name: "", email: "", phone: "", password: "" });
+  const [formError, setFormError] = useState("");
+  const [formLoading, setFormLoading] = useState(false);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+  const closeModal = () => {
+    setModal(null); setSel(null);
+    setForm({ name: "", email: "", phone: "", password: "" }); setFormError("");
+  };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = { page, limit: 10 };
+      if (search) params.search = search;
+      const res = await api.get("/admins", { params });
+      setAdmins(res.data.admins || []);
+      setTotal(res.data.total || 0);
+      setTotalPages(res.data.totalPages || 1);
+    } catch {
+      setAdmins([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, search]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleFormSubmit = async (e) => {
+    e.preventDefault();
+    setFormError("");
+    setFormLoading(true);
+    try {
+      if (sel) {
+        const { password: _pw, ...updateData } = form;
+        await api.put(`/admins/${sel._id}`, updateData);
+        showToast("Admin updated");
+      } else {
+        await api.post("/admins", form);
+        showToast("Admin created");
+      }
+      closeModal();
+      load();
+    } catch (err) {
+      setFormError(err?.response?.data?.message || "Operation failed. Please try again.");
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const handleToggleDeactivate = async (adminId) => {
+    setTogglingId(adminId);
+    try {
+      const res = await api.put(`/admins/${adminId}/deactivate`);
+      showToast(res.data.message || "Updated");
+      load();
+    } catch {
+      showToast("Failed to update admin");
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.delete(`/admins/${sel._id}`);
+      showToast("Admin deleted");
+      closeModal();
+      load();
+    } catch (err) {
+      showToast(err?.response?.data?.message || "Failed to delete admin");
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div>
+      <SectionHeader title="Admin Management" count={total} buttonLabel="Add Admin"
+        onAction={() => { setSel(null); setModal("form"); }} />
+
+      <div className="px-6 py-4 space-y-4">
+        <form onSubmit={(e) => { e.preventDefault(); setSearch(searchInput); setPage(1); }} className="flex gap-2">
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search by name or email…"
+            className="flex-1 border border-(--border-light) rounded-lg px-4 py-2 text-sm outline-none focus:border-(--secondary) transition-all" />
+          <button type="submit"
+            className="px-4 py-2 bg-(--accent) text-white text-sm font-semibold rounded-lg hover:bg-(--secondary) transition-colors flex items-center gap-1.5">
+            <FaSearch className="text-xs" /> Search
+          </button>
+        </form>
+
+        {loading ? (
+          <div className="space-y-3">
+            {[...Array(5)].map((_, i) => <div key={i} className="h-14 bg-gray-100 rounded-lg animate-pulse" />)}
+          </div>
+        ) : admins.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400">
+            <FaUserShield className="text-4xl mb-3" />
+            <p className="font-semibold text-gray-600">No admins found</p>
+            <p className="text-sm mt-1">Create your first admin using the button above.</p>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px]">
+                <thead>
+                  <tr className="border-b border-(--border-light)">
+                    {["Name", "Email", "Phone", "Status", "Actions"].map((h) => (
+                      <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider pb-3 px-3 first:pl-0 last:pr-0">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-light)]">
+                  {admins.map((a) => (
+                    <tr key={a._id} className="hover:bg-(--surface-warm) transition-colors">
+                      <td className="py-3.5 px-3 pl-0">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-(--secondary) text-white text-xs font-bold flex items-center justify-center shrink-0">
+                            {a.name?.charAt(0).toUpperCase()}
+                          </div>
+                          <span className="text-sm font-semibold text-(--accent)">{a.name}</span>
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-3"><span className="text-sm text-gray-600">{a.email}</span></td>
+                      <td className="py-3.5 px-3"><span className="text-sm text-gray-600">{a.phone || "—"}</span></td>
+                      <td className="py-3.5 px-3">
+                        <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${a.isBlocked ? "bg-red-100 text-red-600" : "bg-green-100 text-green-700"}`}>
+                          {a.isBlocked ? "Inactive" : "Active"}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-3 pr-0">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => { setSel(a); setForm({ name: a.name, email: a.email, phone: a.phone || "", password: "" }); setModal("form"); }}
+                            className="w-8 h-8 rounded-lg bg-amber-50 text-amber-500 hover:bg-amber-100 flex items-center justify-center transition-colors" title="Edit">
+                            <FaEdit className="text-xs" />
+                          </button>
+                          <button onClick={() => handleToggleDeactivate(a._id)} disabled={togglingId === a._id}
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors disabled:opacity-50 ${a.isBlocked ? "bg-green-50 text-green-600 hover:bg-green-100" : "bg-orange-50 text-orange-500 hover:bg-orange-100"}`}
+                            title={a.isBlocked ? "Activate" : "Deactivate"}>
+                            {a.isBlocked ? <FaUnlock className="text-xs" /> : <FaBan className="text-xs" />}
+                          </button>
+                          <button onClick={() => { setSel(a); setModal("delete"); }}
+                            className="w-8 h-8 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center transition-colors" title="Delete">
+                            <FaTrash className="text-xs" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination page={page} totalPages={totalPages} onPage={setPage} />
+          </>
+        )}
+      </div>
+
+      {modal === "form" && (
+        <Modal title={sel ? "Edit Admin" : "Create Admin"} onClose={closeModal}>
+          <form onSubmit={handleFormSubmit} className="space-y-4">
+            {formError && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{formError}</div>}
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Name *</label>
+              <input type="text" required value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Admin name"
+                className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) transition-all" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Email *</label>
+              <input type="email" required value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                placeholder="admin@example.com"
+                className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) transition-all" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Phone {sel ? "" : "*"}</label>
+              <input type="tel" required={!sel} value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+                placeholder="10-digit phone"
+                className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) transition-all" />
+            </div>
+            {!sel && (
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">Password *</label>
+                <input type="password" required value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  placeholder="••••••••"
+                  className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) transition-all" />
+              </div>
+            )}
+            <div className="flex gap-3 pt-1">
+              <button type="button" onClick={closeModal}
+                className="flex-1 py-2.5 border border-(--border-light) text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button type="submit" disabled={formLoading}
+                className="flex-1 py-2.5 bg-(--accent) text-white text-sm font-semibold rounded-lg hover:bg-(--secondary) transition-colors disabled:opacity-60">
+                {formLoading ? "Saving…" : sel ? "Save Changes" : "Create Admin"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {modal === "delete" && sel && (
+        <DeleteConfirm type="Admin" name={sel.name} loading={deleting} onClose={closeModal} onConfirm={handleDelete} />
+      )}
+
+      {toast && <Toast message={toast} />}
+    </div>
+  );
+}
+
+// ─── Cart tab ─────────────────────────────────────────────────
+function CartTab() {
+  const router = useRouter();
+  const items = useCartStore((s) => s.items);
+  const loading = useCartStore((s) => s.loading);
+  const { fetchCart, updateItem, removeItem, emptyCart } = useCart();
+  const [toast, setToast] = useState("");
+  const [clearing, setClearing] = useState(false);
+  const [removingId, setRemovingId] = useState(null);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+
+  useEffect(() => { fetchCart(); }, []);
+
+  const handleQty = async (productId, newQty) => {
+    if (newQty < 1) return;
+    try { await updateItem(productId, newQty); }
+    catch { showToast("Failed to update quantity"); }
+  };
+
+  const handleRemove = async (productId) => {
+    setRemovingId(productId);
+    try { await removeItem(productId); showToast("Item removed"); }
+    catch { showToast("Failed to remove item"); }
+    finally { setRemovingId(null); }
+  };
+
+  const handleClear = async () => {
+    setClearing(true);
+    try { await emptyCart(); showToast("Cart cleared"); }
+    finally { setClearing(false); }
+  };
+
+  const subtotal = items.reduce((sum, i) => sum + (i.product?.price || 0) * i.quantity, 0);
+  const totalQty = items.reduce((sum, i) => sum + i.quantity, 0);
+
+  return (
+    <div>
+      <SectionHeader title="My Cart" count={totalQty > 0 ? totalQty : undefined} />
+
+      <div className="px-6 py-4">
+        {loading ? (
+          <div className="space-y-3">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-24 bg-gray-100 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400">
+            <FaShoppingCart className="text-4xl mb-3" />
+            <p className="font-semibold text-gray-600">Your cart is empty</p>
+            <p className="text-sm mt-1">Add products to your cart to see them here.</p>
+          </div>
+        ) : (
+          <div className="flex flex-col lg:flex-row gap-6">
+            <div className="flex-1 space-y-3">
+              {items.map((item) => {
+                const product = item.product;
+                if (!product) return null;
+                const img = product.images?.[0];
+                const productId = product._id || product;
+                const lineTotal = (product.price || 0) * item.quantity;
+
+                return (
+                  <div key={productId} className="flex gap-4 bg-white border border-(--border-light) rounded-xl p-4 hover:border-(--secondary) transition-colors">
+                    <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                      {img
+                        ? <img src={img.url} alt={img.alt || product.name} className="w-full h-full object-cover" />
+                        : <div className="w-full h-full flex items-center justify-center text-gray-400"><FaImage /></div>
+                      }
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-(--accent) line-clamp-1">{product.name}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{product.brand}</p>
+                      <p className="text-sm font-bold text-(--secondary) mt-1">₹{product.price?.toLocaleString()}</p>
+                    </div>
+                    <div className="flex flex-col items-end justify-between shrink-0">
+                      <button
+                        onClick={() => handleRemove(productId)}
+                        disabled={removingId === productId}
+                        className="w-7 h-7 rounded-lg bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors disabled:opacity-50"
+                        title="Remove"
+                      >
+                        <FaTrash className="text-[10px]" />
+                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleQty(productId, item.quantity - 1)}
+                          disabled={item.quantity <= 1}
+                          className="w-7 h-7 rounded-lg border border-(--border-light) text-gray-600 hover:border-(--secondary) hover:text-(--secondary) flex items-center justify-center text-sm font-bold transition-colors disabled:opacity-40"
+                        >
+                          −
+                        </button>
+                        <span className="w-8 text-center text-sm font-semibold text-(--accent)">{item.quantity}</span>
+                        <button
+                          onClick={() => handleQty(productId, item.quantity + 1)}
+                          className="w-7 h-7 rounded-lg border border-(--border-light) text-gray-600 hover:border-(--secondary) hover:text-(--secondary) flex items-center justify-center text-sm font-bold transition-colors"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <p className="text-xs font-bold text-gray-700">₹{lineTotal.toLocaleString()}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="lg:w-72 shrink-0">
+              <div className="bg-white border border-(--border-light) rounded-xl p-5 sticky top-4">
+                <h3 className="text-sm font-bold text-(--accent) mb-4">Order Summary</h3>
+                <div className="space-y-2.5 text-sm">
+                  <div className="flex justify-between text-gray-600">
+                    <span>Items ({totalQty})</span>
+                    <span>₹{subtotal.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-600">
+                    <span>Shipping</span>
+                    <span className={subtotal >= 2500 ? "text-green-600 font-semibold" : "text-gray-600"}>
+                      {subtotal >= 2500 ? "FREE" : "Calculated at checkout"}
+                    </span>
+                  </div>
+                  {subtotal > 0 && subtotal < 2500 && (
+                    <p className="text-[11px] text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+                      Add ₹{(2500 - subtotal).toLocaleString()} more for free shipping
+                    </p>
+                  )}
+                  <div className="border-t border-(--border-light) pt-2.5 flex justify-between font-bold text-(--accent)">
+                    <span>Subtotal</span>
+                    <span>₹{subtotal.toLocaleString()}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => router.push("/checkout")}
+                  className="w-full mt-5 py-3 bg-(--accent) text-white text-sm font-bold rounded-xl hover:bg-(--secondary) transition-colors"
+                >
+                  Proceed to Checkout
+                </button>
+                <button
+                  onClick={handleClear}
+                  disabled={clearing}
+                  className="w-full mt-2.5 py-2.5 border border-red-200 text-red-500 text-sm font-semibold rounded-xl hover:bg-red-50 transition-colors disabled:opacity-50"
+                >
+                  {clearing ? "Clearing..." : "Clear Cart"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {toast && <Toast message={toast} />}
+    </div>
+  );
+}
+
 // ─── Profile tab ──────────────────────────────────────────────
 function ProfileTab({ user }) {
   return (
@@ -911,8 +1766,8 @@ function PlaceholderTab({ title, icon }) {
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────
-export default function AccountPage() {
+// ─── Main Dashboard Page ──────────────────────────────────────
+export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const logout = useAuthStore((s) => s.logout);
@@ -923,6 +1778,12 @@ export default function AccountPage() {
   useEffect(() => {
     if (!isAuthenticated) router.replace("/auth");
   }, [isAuthenticated, router]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (tab) setActiveTab(tab);
+  }, []);
 
   if (!isAuthenticated || !user) {
     return (
@@ -945,8 +1806,10 @@ export default function AccountPage() {
       case "create-product":     return <CreateProductSection />;
       case "manage-categories":  return <ManageCategories />;
       case "create-category":    return <CreateCategorySection />;
-      case "orders":             return <PlaceholderTab title="Orders" icon={<FaTruck />} />;
-      case "cart":               return <PlaceholderTab title="Cart" icon={<FaShoppingCart />} />;
+      case "orders":             return isAdminRole(user?.role) ? <AdminOrdersTab /> : <MyOrdersTab />;
+      case "user-management":    return <UserManagementTab />;
+      case "admin-management":   return <AdminManagementTab />;
+      case "cart":               return <CartTab />;
       case "wishlist":           return <PlaceholderTab title="Wishlist" icon={<FaHeart />} />;
       case "settings":           return <PlaceholderTab title="Settings" icon={<FaCog />} />;
       default:                   return <ProfileTab user={user} />;

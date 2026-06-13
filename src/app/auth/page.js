@@ -86,13 +86,20 @@ export default function AuthPage() {
       });
   }
 
+  function dashboardPath(user) {
+    if (user?.role === "superadmin") return "/superadmin/dashboard";
+    if (user?.role === "admin") return "/admin/dashboard";
+    return "/user/dashboard";
+  }
+
   async function handleLogin(e) {
     e.preventDefault();
     setError("");
     const fd = new FormData(e.target);
     try {
       await login({ email: fd.get("email"), password: fd.get("password") });
-      router.push("/account");
+      const { user } = useAuthStore.getState();
+      router.push(dashboardPath(user));
     } catch (err) {
       setError(err?.response?.data?.message || "Login failed. Please try again.");
     }
@@ -110,7 +117,8 @@ export default function AuthPage() {
         password: fd.get("password"),
       });
       setSuccessMsg(data.message || "Registered successfully!");
-      setTimeout(() => router.push("/account"), 1800);
+      const { user } = useAuthStore.getState();
+      setTimeout(() => router.push(dashboardPath(user)), 1800);
     } catch (err) {
       setError(err?.response?.data?.message || "Registration failed. Please try again.");
     }

@@ -2,22 +2,30 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { FaHeart, FaRegHeart, FaShoppingCart, FaStar, FaChevronLeft, FaFilter } from "react-icons/fa";
+import { useRouter } from "next/navigation";
+import { FaHeart, FaRegHeart, FaShoppingCart, FaStar, FaChevronLeft, FaFilter, FaCheck } from "react-icons/fa";
 import { getCategoryById } from "@/routes/category.routes";
 import useProductStore from "@/store/product.store";
 import { useProduct } from "@/hooks/useProduct";
+import useAuthStore from "@/store/auth.store";
+import { useCart } from "@/hooks/useCart";
 
 export default function CategoryPage({ params }) {
   const { id } = use(params);
+  const router = useRouter();
 
   const products = useProductStore((s) => s.products);
   const { fetchProductsByCategory } = useProduct();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const { addToCart } = useCart();
   const [category, setCategory] = useState(null);
   const [loading, setLoading] = useState(true);
   const [wishlisted, setWishlisted] = useState({});
   const [sort, setSort] = useState("createdAt");
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
+  const [addingId, setAddingId] = useState(null);
+  const [cartToast, setCartToast] = useState("");
 
   useEffect(() => {
     getCategoryById(id)
@@ -33,6 +41,20 @@ export default function CategoryPage({ params }) {
   }, [id, sort, page]);
 
   const toggleWish = (pid) => setWishlisted((prev) => ({ ...prev, [pid]: !prev[pid] }));
+
+  const handleAddToCart = async (productId) => {
+    if (!isAuthenticated) { router.push("/auth"); return; }
+    setAddingId(productId);
+    try {
+      await addToCart(productId, 1);
+      setCartToast("Added to cart!");
+    } catch {
+      setCartToast("Failed to add to cart");
+    } finally {
+      setAddingId(null);
+      setTimeout(() => setCartToast(""), 2500);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-(--surface-warm)">
@@ -160,10 +182,16 @@ export default function CategoryPage({ params }) {
                       </div>
 
                       <button
-                        disabled={product.stock === 0}
+                        onClick={() => handleAddToCart(product._id)}
+                        disabled={product.stock === 0 || addingId === product._id}
                         className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 bg-(--secondary) text-white text-xs font-bold rounded-lg hover:bg-(--accent) transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <FaShoppingCart className="text-xs" /> Add to Cart
+                        {addingId === product._id ? (
+                          <span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                        ) : (
+                          <FaShoppingCart className="text-xs" />
+                        )}
+                        {addingId === product._id ? "Adding..." : "Add to Cart"}
                       </button>
                     </div>
                   </div>
@@ -196,6 +224,12 @@ export default function CategoryPage({ params }) {
           </>
         )}
       </div>
+
+      {cartToast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 bg-green-600 text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-lg">
+          <FaCheck className="text-xs" /> {cartToast}
+        </div>
+      )}
     </div>
   );
 }
