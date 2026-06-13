@@ -53,6 +53,12 @@ strong { font-weight: 700; }
   will-change: transform;
 }
 
+/* ─── Slide-in animation (Navbar panel) ─── */
+@keyframes slideInFromRight {
+  from { transform: translateX(100%); opacity: 0.7; }
+  to   { transform: translateX(0);    opacity: 1;   }
+}
+
 /* ─── Fade up (GSAP helper class) ─── */
 .gsap-fade { opacity: 0; transform: translateY(30px); }
 

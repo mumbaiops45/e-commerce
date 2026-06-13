@@ -338,12 +338,6 @@ export default function Navbar() {
         </>
       )}
 
-      <style jsx global>{`
-        @keyframes slideInFromRight {
-          from { transform: translateX(100%); opacity: 0.7; }
-          to   { transform: translateX(0);    opacity: 1;   }
-        }
-      `}</style>
     </nav>
   );
 }
