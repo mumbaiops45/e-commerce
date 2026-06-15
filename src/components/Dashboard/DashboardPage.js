@@ -18,6 +18,7 @@ import {
 } from "react-icons/fa";
 import api from "@/lib/axios";
 import { getMyOrders, getAllOrdersAdmin } from "@/routes/order.routes";
+import { createPaymentOrder, verifyPayment } from "@/routes/payment.routes";
 
 const isAdminRole = (role) => role === "admin" || role === "superadmin";
 
@@ -892,22 +893,80 @@ function Pagination({ page, totalPages, onPage }) {
 
 // ─── My Orders (user) ────────────────────────────────────────
 function MyOrdersTab() {
+  const user = useAuthStore((s) => s.user);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const [payingId, setPayingId] = useState(null);
+  const [toast, setToast] = useState("");
   const [page, setPage] = useState(1);
   const PER_PAGE = 5;
 
-  useEffect(() => {
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+
+  const loadOrders = () => {
+    setLoading(true);
     getMyOrders()
       .then((d) => setOrders(d.orders || []))
       .catch(() => setError("Failed to load orders. Please try again."))
       .finally(() => setLoading(false));
-  }, []);
+  };
 
-  const totalPages = Math.ceil(orders.length / PER_PAGE);
-  const paged = orders.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  useEffect(() => { loadOrders(); }, []);
+
+  const loadRazorpayScript = () =>
+    new Promise((resolve) => {
+      if (window.Razorpay) return resolve(true);
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+
+  const handlePay = async (order) => {
+    setPayingId(order._id);
+    try {
+      const loaded = await loadRazorpayScript();
+      if (!loaded) { showToast("Failed to load payment gateway. Please try again."); setPayingId(null); return; }
+
+      const { razorpayOrder } = await createPaymentOrder(order._id);
+
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: razorpayOrder.amount,
+        currency: razorpayOrder.currency,
+        name: "HGS Store",
+        description: `Order #${order._id.slice(-8).toUpperCase()}`,
+        order_id: razorpayOrder.id,
+        prefill: { name: user?.name || "", email: user?.email || "" },
+        theme: { color: "#1a1a2e" },
+        handler: async (response) => {
+          try {
+            await verifyPayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            showToast("Payment successful!");
+            loadOrders();
+          } catch {
+            showToast("Payment verification failed. Please contact support.");
+          }
+        },
+        modal: { ondismiss: () => setPayingId(null) },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.on("payment.failed", () => { showToast("Payment failed. Please try again."); setPayingId(null); });
+      rzp.open();
+    } catch (err) {
+      showToast(err?.response?.data?.message || "Failed to initiate payment");
+      setPayingId(null);
+    }
+  };
 
   const SC = {
     pending: "bg-amber-100 text-amber-700",
@@ -922,10 +981,47 @@ function MyOrdersTab() {
     failed: "bg-red-100 text-red-600",
   };
 
+  const filtered = filter === "unpaid"
+    ? orders.filter((o) => o.paymentStatus === "pending")
+    : filter === "paid"
+    ? orders.filter((o) => o.paymentStatus === "paid")
+    : orders;
+
+  const totalPages = Math.ceil(filtered.length / PER_PAGE);
+  const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  const unpaidCount = orders.filter((o) => o.paymentStatus === "pending").length;
+
   return (
     <div>
       <SectionHeader title="My Orders" count={orders.length} />
       <div className="px-6 py-4">
+
+        {/* Filter tabs */}
+        {!loading && orders.length > 0 && (
+          <div className="flex gap-2 mb-4 flex-wrap">
+            {[
+              { key: "all", label: "All Orders", count: orders.length },
+              { key: "unpaid", label: "Pending Payment", count: unpaidCount },
+              { key: "paid", label: "Paid", count: orders.filter((o) => o.paymentStatus === "paid").length },
+            ].map((f) => (
+              <button key={f.key}
+                onClick={() => { setFilter(f.key); setPage(1); }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                  filter === f.key
+                    ? "bg-(--accent) text-white"
+                    : "bg-white border border-(--border-light) text-gray-600 hover:border-(--secondary)"
+                }`}>
+                {f.label}
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  filter === f.key ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"
+                }`}>
+                  {f.count}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {loading ? (
           <div className="space-y-3">
             {[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-gray-100 rounded-xl animate-pulse" />)}
@@ -938,35 +1034,52 @@ function MyOrdersTab() {
             <p className="font-semibold text-gray-600">No orders yet</p>
             <p className="text-sm mt-1">Your orders will appear here after checkout.</p>
           </div>
+        ) : paged.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center text-gray-400">
+            <FaBoxOpen className="text-3xl mb-3" />
+            <p className="font-semibold text-gray-600">No orders in this category</p>
+          </div>
         ) : (
           <>
             <div className="space-y-3">
               {paged.map((order) => (
                 <div key={order._id} className="bg-white border border-(--border-light) rounded-xl overflow-hidden">
-                  <button
-                    className="w-full flex items-center gap-4 px-4 py-4 hover:bg-(--surface-warm) transition-colors text-left"
-                    onClick={() => setExpandedId(expandedId === order._id ? null : order._id)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-bold text-(--accent)">#{order._id.slice(-8).toUpperCase()}</p>
-                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold capitalize ${SC[order.orderStatus] || "bg-gray-100 text-gray-600"}`}>
-                          {order.orderStatus}
-                        </span>
-                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold capitalize ${PC[order.paymentStatus] || "bg-gray-100 text-gray-600"}`}>
-                          {order.paymentStatus}
-                        </span>
+                  <div className="flex items-center gap-3 px-4 py-4">
+                    <button
+                      className="flex-1 flex items-center gap-4 text-left min-w-0"
+                      onClick={() => setExpandedId(expandedId === order._id ? null : order._id)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-bold text-(--accent)">#{order._id.slice(-8).toUpperCase()}</p>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold capitalize ${SC[order.orderStatus] || "bg-gray-100 text-gray-600"}`}>
+                            {order.orderStatus}
+                          </span>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold capitalize ${PC[order.paymentStatus] || "bg-gray-100 text-gray-600"}`}>
+                            {order.paymentStatus}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {new Date(order.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                          {" · "}{order.items?.length || 0} item{order.items?.length !== 1 ? "s" : ""}
+                        </p>
                       </div>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {new Date(order.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
-                        {" · "}{order.items?.length || 0} item{order.items?.length !== 1 ? "s" : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end shrink-0">
-                      <p className="text-sm font-bold text-(--accent)">₹{order.totalAmount?.toLocaleString()}</p>
-                      <FaChevronDown className={`text-[10px] text-gray-400 mt-1 transition-transform ${expandedId === order._id ? "rotate-180" : ""}`} />
-                    </div>
-                  </button>
+                      <div className="flex flex-col items-end shrink-0">
+                        <p className="text-sm font-bold text-(--accent)">₹{order.totalAmount?.toLocaleString()}</p>
+                        <FaChevronDown className={`text-[10px] text-gray-400 mt-1 transition-transform ${expandedId === order._id ? "rotate-180" : ""}`} />
+                      </div>
+                    </button>
+
+                    {order.paymentStatus === "pending" && (
+                      <button
+                        onClick={() => handlePay(order)}
+                        disabled={payingId === order._id}
+                        className="shrink-0 px-3 py-2 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 transition-colors disabled:opacity-60"
+                      >
+                        {payingId === order._id ? "Opening…" : "Pay Now"}
+                      </button>
+                    )}
+                  </div>
 
                   {expandedId === order._id && (
                     <div className="border-t border-(--border-light) px-4 py-4 space-y-3">
@@ -1005,6 +1118,7 @@ function MyOrdersTab() {
           </>
         )}
       </div>
+      {toast && <Toast message={toast} />}
     </div>
   );
 }
@@ -1716,10 +1830,61 @@ function CartTab() {
 
 // ─── Profile tab ──────────────────────────────────────────────
 function ProfileTab({ user }) {
+  const setUser = useAuthStore((s) => s.setUser);
+  const [mode, setMode] = useState("view"); // view | edit | password
+  const [form, setForm] = useState({ name: user?.name || "", email: user?.email || "", phone: user?.phone || "" });
+  const [pwForm, setPwForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+
+  const handleProfileSave = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSaving(true);
+    try {
+      const res = await api.put("/users/me", form);
+      setUser(res.data.user);
+      setMode("view");
+      showToast("Profile updated successfully");
+    } catch (err) {
+      setError(err?.response?.data?.message || "Failed to update profile");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePasswordSave = async (e) => {
+    e.preventDefault();
+    if (pwForm.newPassword !== pwForm.confirmPassword) {
+      setError("New passwords do not match");
+      return;
+    }
+    setError("");
+    setSaving(true);
+    try {
+      await api.put("/users/me/password", {
+        currentPassword: pwForm.currentPassword,
+        newPassword: pwForm.newPassword,
+      });
+      setPwForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setMode("view");
+      showToast("Password changed successfully");
+    } catch (err) {
+      setError(err?.response?.data?.message || "Failed to change password");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="px-6 py-6 max-w-xl">
       <h2 className="text-xl font-bold text-(--accent) mb-6">My Profile</h2>
+
       <div className="bg-white rounded-2xl border border-(--border-light) overflow-hidden">
+        {/* Header banner */}
         <div className="bg-(--accent) px-6 py-10 flex items-center gap-5">
           <div className="w-20 h-20 rounded-full bg-white/20 text-white text-3xl font-bold flex items-center justify-center shrink-0 border-2 border-white/40">
             {user?.name?.charAt(0).toUpperCase()}
@@ -1732,20 +1897,115 @@ function ProfileTab({ user }) {
             </span>
           </div>
         </div>
-        <div className="p-6 space-y-4">
-          {[
-            { label: "Full Name", value: user?.name },
-            { label: "Email Address", value: user?.email },
-            { label: "Phone", value: user?.phone || "Not provided" },
-            { label: "Role", value: user?.role || "user", cap: true },
-          ].map((f) => (
-            <div key={f.label} className="flex items-center justify-between py-3 border-b border-(--border-light) last:border-0">
-              <span className="text-sm text-gray-500 font-medium">{f.label}</span>
-              <span className={`text-sm font-semibold text-(--accent) ${f.cap ? "capitalize" : ""}`}>{f.value}</span>
+
+        {/* View mode */}
+        {mode === "view" && (
+          <div className="p-6">
+            <div className="space-y-0 mb-5">
+              {[
+                { label: "Full Name", value: user?.name },
+                { label: "Email Address", value: user?.email },
+                { label: "Phone", value: user?.phone || "Not provided" },
+                { label: "Role", value: user?.role || "user", cap: true },
+              ].map((f) => (
+                <div key={f.label} className="flex items-center justify-between py-3 border-b border-(--border-light) last:border-0">
+                  <span className="text-sm text-gray-500 font-medium">{f.label}</span>
+                  <span className={`text-sm font-semibold text-(--accent) ${f.cap ? "capitalize" : ""}`}>{f.value}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setForm({ name: user?.name || "", email: user?.email || "", phone: user?.phone || "" }); setError(""); setMode("edit"); }}
+                className="flex-1 py-2.5 bg-(--accent) text-white text-sm font-semibold rounded-xl hover:bg-(--secondary) transition-colors flex items-center justify-center gap-2"
+              >
+                <FaEdit className="text-xs" /> Edit Profile
+              </button>
+              <button
+                onClick={() => { setPwForm({ currentPassword: "", newPassword: "", confirmPassword: "" }); setError(""); setMode("password"); }}
+                className="flex-1 py-2.5 border border-(--border-light) text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Change Password
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Edit profile mode */}
+        {mode === "edit" && (
+          <form onSubmit={handleProfileSave} className="p-6 space-y-4">
+            {error && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{error}</div>}
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Full Name *</label>
+              <input type="text" required value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Email Address *</label>
+              <input type="email" required value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Phone Number</label>
+              <input type="tel" maxLength={10} value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+                placeholder="10-digit number"
+                className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all" />
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button type="button" onClick={() => setMode("view")}
+                className="flex-1 py-2.5 border border-(--border-light) text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button type="submit" disabled={saving}
+                className="flex-1 py-2.5 bg-(--accent) text-white text-sm font-semibold rounded-xl hover:bg-(--secondary) transition-colors disabled:opacity-60">
+                {saving ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Change password mode */}
+        {mode === "password" && (
+          <form onSubmit={handlePasswordSave} className="p-6 space-y-4">
+            {error && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{error}</div>}
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Current Password *</label>
+              <input type="password" required value={pwForm.currentPassword}
+                onChange={(e) => setPwForm({ ...pwForm, currentPassword: e.target.value })}
+                placeholder="••••••••"
+                className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">New Password *</label>
+              <input type="password" required minLength={6} value={pwForm.newPassword}
+                onChange={(e) => setPwForm({ ...pwForm, newPassword: e.target.value })}
+                placeholder="Min. 6 characters"
+                className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Confirm New Password *</label>
+              <input type="password" required value={pwForm.confirmPassword}
+                onChange={(e) => setPwForm({ ...pwForm, confirmPassword: e.target.value })}
+                placeholder="••••••••"
+                className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all" />
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button type="button" onClick={() => setMode("view")}
+                className="flex-1 py-2.5 border border-(--border-light) text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button type="submit" disabled={saving}
+                className="flex-1 py-2.5 bg-(--accent) text-white text-sm font-semibold rounded-xl hover:bg-(--secondary) transition-colors disabled:opacity-60">
+                {saving ? "Saving…" : "Change Password"}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
+      {toast && <Toast message={toast} />}
     </div>
   );
 }
