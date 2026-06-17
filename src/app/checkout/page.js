@@ -7,9 +7,11 @@ import useAuthStore from "@/store/auth.store";
 import useCartStore from "@/store/cart.store";
 import { useCart } from "@/hooks/useCart";
 import { placeOrder } from "@/routes/order.routes";
+import { getAllCoupons } from "@/routes/coupon.routes";
+import { createPaymentOrder, verifyPayment } from "@/routes/payment.routes";
 import {
   FaArrowLeft, FaShoppingBag, FaMapMarkerAlt,
-  FaCheckCircle, FaImage, FaTruck,
+  FaCheckCircle, FaImage, FaTruck, FaTag, FaTimes,
 } from "react-icons/fa";
 
 export default function CheckoutPage() {
@@ -35,6 +37,13 @@ export default function CheckoutPage() {
     name: "", phone: "", address: "", city: "", state: "", pincode: "",
   });
 
+  // ─── Coupon state ─────────────────────────────────────────────
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponError, setCouponError] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [discountAmount, setDiscountAmount] = useState(0);
+
   useEffect(() => {
     if (!isAuthenticated) {
       router.replace("/auth");
@@ -53,7 +62,62 @@ export default function CheckoutPage() {
 
   const subtotal = items.reduce((sum, i) => sum + (i.product?.price || 0) * i.quantity, 0);
   const shipping = subtotal >= 2500 ? 0 : 100;
-  const total = subtotal + shipping;
+  const total = subtotal + shipping - discountAmount;
+
+  // ─── Apply coupon ─────────────────────────────────────────────
+  const handleApplyCoupon = async () => {
+    const code = couponInput.trim().toUpperCase();
+    if (!code) return;
+    setCouponError("");
+    setCouponLoading(true);
+    try {
+      const data = await getAllCoupons();
+      const coupon = (data.coupons || []).find(
+        (c) => c.code === code && c.isActive
+      );
+
+      if (!coupon) { setCouponError("Invalid or inactive coupon code."); return; }
+      if (new Date(coupon.expiresAt) < new Date()) { setCouponError("This coupon has expired."); return; }
+      if (coupon.usedCount >= coupon.useLimit) { setCouponError("This coupon's usage limit has been reached."); return; }
+      if (subtotal < coupon.minimumOrderAmount) {
+        setCouponError(`Minimum order of ₹${coupon.minimumOrderAmount.toLocaleString()} required for this coupon.`);
+        return;
+      }
+
+      let discount = coupon.discountType === "fixed"
+        ? coupon.discountValue
+        : (subtotal * coupon.discountValue) / 100;
+
+      if (coupon.maximumDiscountAmount && discount > coupon.maximumDiscountAmount) {
+        discount = coupon.maximumDiscountAmount;
+      }
+      discount = Math.min(discount, subtotal);
+
+      setAppliedCoupon(coupon);
+      setDiscountAmount(discount);
+    } catch {
+      setCouponError("Failed to validate coupon. Please try again.");
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setDiscountAmount(0);
+    setCouponInput("");
+    setCouponError("");
+  };
+
+  const loadRazorpayScript = () =>
+    new Promise((resolve) => {
+      if (window.Razorpay) return resolve(true);
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
 
   const handleAddressSubmit = async (e) => {
     e.preventDefault();
@@ -64,17 +128,67 @@ export default function CheckoutPage() {
         productId: item.product?._id || item.product,
         quantity: item.quantity,
       }));
-      const result = await placeOrder(orderItems, addr);
-      setCreatedOrder(result.order);
-      try { await emptyCart(); } catch {}
-      setStep("success");
+
+      // Step 1: Create the order (pending payment), pass coupon code if applied
+      const result = await placeOrder(orderItems, addr, appliedCoupon?.code);
+      const order = result.order;
+      setCreatedOrder(order);
+
+      // Step 2: Load Razorpay and open payment modal
+      const loaded = await loadRazorpayScript();
+      if (!loaded) {
+        await emptyCart().catch(() => {});
+        router.push(`${dashboardPath}?tab=orders`);
+        return;
+      }
+
+      const { razorpayOrder } = await createPaymentOrder(order._id);
+
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: razorpayOrder.amount,
+        currency: razorpayOrder.currency,
+        name: "HGS Store",
+        description: `Order #${order._id.slice(-8).toUpperCase()}`,
+        order_id: razorpayOrder.id,
+        prefill: { name: user?.name || "", email: user?.email || "" },
+        theme: { color: "#1a1a2e" },
+        handler: async (response) => {
+          try {
+            await verifyPayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            await emptyCart().catch(() => {});
+            setStep("success");
+          } catch {
+            setError("Payment verification failed. Your order is saved — pay from My Orders.");
+          }
+          setLoading(false);
+        },
+        modal: {
+          ondismiss: () => {
+            emptyCart().catch(() => {});
+            router.push(`${dashboardPath}?tab=orders`);
+            setLoading(false);
+          },
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.on("payment.failed", () => {
+        emptyCart().catch(() => {});
+        router.push(`${dashboardPath}?tab=orders`);
+        setLoading(false);
+      });
+      rzp.open();
     } catch (err) {
       setError(
         err?.response?.data?.errors?.[0]?.message ||
         err?.response?.data?.message ||
         "Failed to place order. Please try again."
       );
-    } finally {
       setLoading(false);
     }
   };
@@ -89,10 +203,15 @@ export default function CheckoutPage() {
           <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-5">
             <FaCheckCircle className="text-green-500 text-4xl" />
           </div>
-          <h2 className="text-2xl font-bold text-(--accent) mb-2">Order Placed!</h2>
+          <h2 className="text-2xl font-bold text-(--accent) mb-2">Order Placed & Paid!</h2>
           <p className="text-gray-500 text-sm mb-1">
             Order <span className="font-semibold text-(--accent)">#{createdOrder?._id?.slice(-8).toUpperCase()}</span> confirmed.
           </p>
+          {discountAmount > 0 && (
+            <p className="text-green-600 text-xs font-semibold mb-1">
+              You saved ₹{discountAmount.toLocaleString()} with coupon <span className="uppercase">{appliedCoupon?.code}</span>!
+            </p>
+          )}
           <p className="text-gray-400 text-xs mb-8">
             View it anytime in your account under <strong>My Orders</strong>.
           </p>
@@ -121,7 +240,6 @@ export default function CheckoutPage() {
       <h3 className="font-bold text-(--accent) mb-4 flex items-center gap-2 text-sm">
         <FaShoppingBag /> Order Summary
       </h3>
-
       <div className="space-y-3 max-h-56 overflow-y-auto mb-4 pr-1">
         {items.map((item) => {
           const product = item.product;
@@ -147,10 +265,61 @@ export default function CheckoutPage() {
         })}
       </div>
 
-      <div className="border-t border-(--border-light) pt-4 space-y-2 text-sm">
+      {/* ── Coupon section ── */}
+      <div className="border-t border-(--border-light) pt-4 mb-3">
+        {appliedCoupon ? (
+          <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2">
+              <FaTag className="text-green-600 text-xs" />
+              <div>
+                <p className="text-xs font-bold text-green-700 uppercase">{appliedCoupon.code}</p>
+                <p className="text-[11px] text-green-600">
+                  {appliedCoupon.discountType === "fixed"
+                    ? `₹${appliedCoupon.discountValue} off`
+                    : `${appliedCoupon.discountValue}% off`}
+                  {appliedCoupon.maximumDiscountAmount ? ` (max ₹${appliedCoupon.maximumDiscountAmount})` : ""}
+                </p>
+              </div>
+            </div>
+            <button onClick={handleRemoveCoupon} className="text-gray-400 hover:text-red-500 transition-colors ml-2">
+              <FaTimes className="text-xs" />
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-gray-600">Have a coupon?</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={couponInput}
+                onChange={(e) => { setCouponInput(e.target.value.toUpperCase()); setCouponError(""); }}
+                placeholder="Enter code"
+                className="flex-1 border border-(--border-light) rounded-lg px-3 py-2 text-xs outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all uppercase"
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleApplyCoupon())}
+              />
+              <button
+                type="button"
+                onClick={handleApplyCoupon}
+                disabled={couponLoading || !couponInput.trim()}
+                className="px-3 py-2 bg-(--accent) text-white text-xs font-bold rounded-lg hover:bg-(--secondary) transition-colors disabled:opacity-50 whitespace-nowrap"
+              >
+                {couponLoading ? "…" : "Apply"}
+              </button>
+            </div>
+            {couponError && <p className="text-[11px] text-red-600">{couponError}</p>}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-(--border-light) pt-3 space-y-2 text-sm">
         <div className="flex justify-between text-gray-600">
           <span>Subtotal</span><span>₹{subtotal.toLocaleString()}</span>
         </div>
+        {discountAmount > 0 && (
+          <div className="flex justify-between text-green-600 font-semibold">
+            <span>Coupon discount</span><span>−₹{discountAmount.toLocaleString()}</span>
+          </div>
+        )}
         <div className="flex justify-between text-gray-600">
           <span>Shipping</span>
           <span className={shipping === 0 ? "text-green-600 font-semibold" : ""}>
@@ -161,13 +330,11 @@ export default function CheckoutPage() {
           <span>Total</span><span>₹{total.toLocaleString()}</span>
         </div>
       </div>
-
       {subtotal > 0 && subtotal < 2500 && (
         <p className="text-[11px] text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mt-3">
           Add ₹{(2500 - subtotal).toLocaleString()} more for free shipping
         </p>
       )}
-
       <div className="mt-4 flex items-center gap-1.5 text-xs text-gray-400">
         <FaTruck className="text-[10px]" />
         <span>Estimated delivery: 3–5 business days</span>
@@ -178,8 +345,6 @@ export default function CheckoutPage() {
   return (
     <div className="min-h-screen bg-(--surface-warm) py-8 px-4">
       <div className="max-w-5xl mx-auto">
-
-        {/* Header */}
         <div className="flex items-center gap-4 mb-6">
           <button
             onClick={() => router.push(`${dashboardPath}?tab=cart`)}
@@ -189,13 +354,11 @@ export default function CheckoutPage() {
           </button>
           <div>
             <h1 className="text-xl font-bold text-(--accent)">Checkout</h1>
-            <p className="text-xs text-gray-500">Enter delivery details</p>
+            <p className="text-xs text-gray-500">Enter delivery details to proceed to payment</p>
           </div>
         </div>
 
         <div className="flex flex-col lg:flex-row gap-6">
-
-          {/* ── Address form ───────────────────────────────────── */}
           <div className="flex-1">
             <div className="bg-white rounded-2xl border border-(--border-light) overflow-hidden">
               <div className="px-6 py-4 border-b border-(--border-light) flex items-center gap-3">
@@ -252,13 +415,11 @@ export default function CheckoutPage() {
                 </div>
                 <button type="submit" disabled={loading}
                   className="w-full mt-2 py-3 bg-(--accent) text-white font-bold text-sm rounded-xl hover:bg-(--secondary) transition-colors disabled:opacity-60">
-                  {loading ? "Placing Order…" : "Place Order"}
+                  {loading ? "Creating order…" : `Proceed to Payment →${discountAmount > 0 ? ` (₹${total.toLocaleString()})` : ""}`}
                 </button>
               </form>
             </div>
           </div>
-
-          {/* Order summary sidebar */}
           <div className="lg:w-80 shrink-0">
             <OrderSummary />
           </div>

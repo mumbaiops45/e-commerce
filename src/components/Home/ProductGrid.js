@@ -155,8 +155,9 @@ export default function ProductGrid() {
               return (
                 <div
                   key={product._id}
-                  className="prod-card bg-white rounded-b-xl overflow-hidden border border-(--border-light) group hover:shadow-xl transition-shadow duration-300 flex flex-col"
+                  className="prod-card relative bg-white rounded-b-xl overflow-hidden border border-(--border-light) group hover:shadow-xl transition-shadow duration-300 flex flex-col"
                 >
+                  <Link href={`/product/${product._id}`} className="absolute inset-0 z-0" aria-label={product.title} />
                   <div className="relative aspect-square overflow-hidden bg-gray-50">
                     <img
                       src={img?.url || `https://picsum.photos/seed/${product._id}/400/400`}
@@ -170,7 +171,7 @@ export default function ProductGrid() {
                     )}
                     <button
                       onClick={() => toggleWish(product._id)}
-                      className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white shadow-md flex items-center justify-center hover:bg-(--primary) transition-colors"
+                      className="relative z-10 absolute top-3 right-3 w-8 h-8 rounded-full bg-white shadow-md flex items-center justify-center hover:bg-(--primary) transition-colors"
                     >
                       {wishlisted[product._id]
                         ? <FaHeart className="text-sm text-(--accent)" />
@@ -207,7 +208,7 @@ export default function ProductGrid() {
                       )}
                     </div>
 
-                    <div className="flex gap-2 mt-3">
+                    <div className="relative z-10 flex gap-2 mt-3">
                       <button
                         onClick={() => handleAddToCart(product._id)}
                         disabled={product.stock === 0 || isAdding}

@@ -14,11 +14,13 @@ import {
   FaUser, FaBoxOpen, FaShoppingCart, FaHeart, FaCog, FaBars, FaTimes,
   FaPlus, FaEdit, FaTrash, FaEye, FaChevronDown, FaSignOutAlt,
   FaTag, FaCheck, FaImage, FaTruck, FaExclamationTriangle, FaList,
-  FaUsers, FaUserShield, FaSearch, FaBan, FaUnlock,
+  FaUsers, FaUserShield, FaSearch, FaBan, FaUnlock, FaPercent, FaClipboard,
 } from "react-icons/fa";
 import api from "@/lib/axios";
-import { getMyOrders, getAllOrdersAdmin } from "@/routes/order.routes";
+import { getMyOrders, getAllOrdersAdmin, updateOrder } from "@/routes/order.routes";
 import { createPaymentOrder, verifyPayment } from "@/routes/payment.routes";
+import useCouponStore from "@/store/coupon.store";
+import { useCoupon } from "@/hooks/useCoupon";
 
 const isAdminRole = (role) => role === "admin" || role === "superadmin";
 
@@ -114,6 +116,7 @@ function Sidebar({ user, activeTab, onTabChange, onLogout, mobileOpen, onMobileC
                 <NavItem id="orders" icon={<FaTruck className="text-xs shrink-0" />} label="Orders" />
                 <NavItem id="user-management" icon={<FaUsers className="text-xs shrink-0" />} label="Users" />
                 <NavItem id="admin-management" icon={<FaUserShield className="text-xs shrink-0" />} label="Admins" />
+                <NavItem id="manage-coupons" icon={<FaPercent className="text-xs shrink-0" />} label="Manage Coupons" />
               </>
             )}
 
@@ -128,6 +131,7 @@ function Sidebar({ user, activeTab, onTabChange, onLogout, mobileOpen, onMobileC
             <NavItem id="orders" icon={<FaBoxOpen className="text-xs shrink-0" />} label="My Orders" />
             <NavItem id="cart" icon={<FaShoppingCart className="text-xs shrink-0" />} label="Cart" />
             <NavItem id="wishlist" icon={<FaHeart className="text-xs shrink-0" />} label="Wishlist" />
+            <NavItem id="coupons" icon={<FaPercent className="text-xs shrink-0" />} label="Coupons" />
           </>
         )}
 
@@ -891,6 +895,67 @@ function Pagination({ page, totalPages, onPage }) {
   );
 }
 
+// ─── Shared: Order timeline ───────────────────────────────────
+function OrderTimeline({ order }) {
+  const steps = ["pending", "processing", "shipped", "delivered"];
+  const fmt = (d) => d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null;
+
+  if (order.orderStatus === "cancelled") {
+    return (
+      <div className="flex items-center gap-2 py-1">
+        <div className="w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shrink-0">
+          <FaTimes className="text-[8px] text-white" />
+        </div>
+        <span className="text-xs font-semibold text-red-500">Order Cancelled</span>
+      </div>
+    );
+  }
+
+  const currentIdx = steps.indexOf(order.orderStatus);
+  const stepDates = {
+    pending: fmt(order.orderPlacedAt || order.createdAt),
+    processing: null,
+    shipped: null,
+    delivered: fmt(order.deliveredAt),
+  };
+
+  return (
+    <div className="w-full">
+      <div className="flex items-start">
+        {steps.map((step, idx) => {
+          const done = idx <= currentIdx;
+          const current = idx === currentIdx;
+          return (
+            <div key={step} className="flex items-start flex-1 last:flex-none">
+              <div className="flex flex-col items-center">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                  done ? "bg-green-500 text-white" : "bg-gray-200 text-gray-400"
+                } ${current ? "ring-2 ring-green-300 ring-offset-1" : ""}`}>
+                  {done ? "✓" : idx + 1}
+                </div>
+                <p className={`text-[9px] mt-1 font-semibold capitalize text-center ${done ? "text-green-600" : "text-gray-400"}`}>
+                  {step}
+                </p>
+                {stepDates[step] && (
+                  <p className="text-[9px] text-gray-400 text-center leading-tight">{stepDates[step]}</p>
+                )}
+              </div>
+              {idx < steps.length - 1 && (
+                <div className={`flex-1 h-0.5 mt-3 mx-1 ${idx < currentIdx ? "bg-green-400" : "bg-gray-200"}`} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {order.expectedDeliveryDate && (
+        <p className="text-[10px] text-amber-600 mt-2">
+          Expected delivery: <span className="font-semibold">{fmt(order.expectedDeliveryDate)}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── My Orders (user) ────────────────────────────────────────
 function MyOrdersTab() {
   const user = useAuthStore((s) => s.user);
@@ -1083,6 +1148,10 @@ function MyOrdersTab() {
 
                   {expandedId === order._id && (
                     <div className="border-t border-(--border-light) px-4 py-4 space-y-3">
+                      {/* Timeline */}
+                      <OrderTimeline order={order} />
+
+                      {/* Address */}
                       <div className="p-3 bg-(--surface-warm) rounded-xl text-xs text-gray-600">
                         <p className="font-semibold text-(--accent) mb-1.5">Delivery Address</p>
                         <p className="font-semibold">{order.shippingAddress?.name}</p>
@@ -1090,6 +1159,8 @@ function MyOrdersTab() {
                         <p>{order.shippingAddress?.state} – {order.shippingAddress?.pincode}</p>
                         <p className="mt-0.5">Ph: {order.shippingAddress?.phone}</p>
                       </div>
+
+                      {/* Items */}
                       <div className="space-y-2.5">
                         {order.items?.map((item, idx) => (
                           <div key={idx} className="flex gap-3 items-center">
@@ -1109,6 +1180,23 @@ function MyOrdersTab() {
                           </div>
                         ))}
                       </div>
+
+                      {/* Cancel button — only for pending or processing */}
+                      {["pending", "processing"].includes(order.orderStatus) && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm("Are you sure you want to cancel this order?")) return;
+                            try {
+                              await updateOrder(order._id, { orderStatus: "cancelled" });
+                              showToast("Order cancelled");
+                              loadOrders();
+                            } catch { showToast("Failed to cancel order"); }
+                          }}
+                          className="w-full py-2 border border-red-300 text-red-500 text-xs font-semibold rounded-lg hover:bg-red-50 transition-colors"
+                        >
+                          Cancel Order
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1125,6 +1213,7 @@ function MyOrdersTab() {
 
 // ─── Admin Orders (admin/superadmin) ─────────────────────────
 function AdminOrdersTab() {
+  const user = useAuthStore((s) => s.user);
   const [orders, setOrders] = useState([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -1135,6 +1224,8 @@ function AdminOrdersTab() {
   const [orderStatus, setOrderStatus] = useState("");
   const [payStatus, setPayStatus] = useState("");
   const [expandedId, setExpandedId] = useState(null);
+  const [toast, setToast] = useState("");
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1248,6 +1339,10 @@ function AdminOrdersTab() {
 
                   {expandedId === order._id && (
                     <div className="border-t border-(--border-light) px-4 py-4 space-y-3">
+                      {/* Timeline */}
+                      <OrderTimeline order={order} />
+
+                      {/* Address */}
                       <div className="p-3 bg-(--surface-warm) rounded-xl text-xs text-gray-600">
                         <p className="font-semibold text-(--accent) mb-1.5">Delivery Address</p>
                         <p className="font-semibold">{order.shippingAddress?.name}</p>
@@ -1255,6 +1350,8 @@ function AdminOrdersTab() {
                         <p>{order.shippingAddress?.state} – {order.shippingAddress?.pincode}</p>
                         <p className="mt-0.5">Ph: {order.shippingAddress?.phone}</p>
                       </div>
+
+                      {/* Items */}
                       <div className="space-y-2.5">
                         {order.items?.map((item, idx) => (
                           <div key={idx} className="flex gap-3 items-center">
@@ -1274,6 +1371,11 @@ function AdminOrdersTab() {
                           </div>
                         ))}
                       </div>
+
+                      {/* Superadmin status controls */}
+                      {user?.role === "superadmin" && order.orderStatus !== "cancelled" && (
+                        <SuperadminStatusControl order={order} onUpdated={load} showToast={showToast} />
+                      )}
                     </div>
                   )}
                 </div>
@@ -1282,6 +1384,64 @@ function AdminOrdersTab() {
             <Pagination page={page} totalPages={totalPages} onPage={setPage} />
           </>
         )}
+      </div>
+      {toast && <Toast message={toast} />}
+    </div>
+  );
+}
+
+// ─── Superadmin status control ────────────────────────────────
+function SuperadminStatusControl({ order, onUpdated, showToast }) {
+  const [saving, setSaving] = useState(false);
+  const statusFlow = ["pending", "processing", "shipped", "delivered", "cancelled"];
+  const current = order.orderStatus;
+
+  const handleChange = async (newStatus) => {
+    if (newStatus === current) return;
+    setSaving(true);
+    try {
+      const update = { orderStatus: newStatus };
+      if (newStatus === "processing") {
+        const d = new Date();
+        d.setDate(d.getDate() + 5);
+        update.expectedDeliveryDate = d.toISOString();
+      }
+      await updateOrder(order._id, update);
+      showToast(`Status updated to ${newStatus}`);
+      onUpdated();
+    } catch (err) {
+      showToast(err?.response?.data?.message || "Failed to update status");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const SC = {
+    pending: "bg-amber-100 text-amber-700",
+    processing: "bg-blue-100 text-blue-700",
+    shipped: "bg-purple-100 text-purple-700",
+    delivered: "bg-green-100 text-green-700",
+    cancelled: "bg-red-100 text-red-600",
+  };
+
+  return (
+    <div className="pt-1">
+      <p className="text-xs font-semibold text-gray-500 mb-2">Update Status</p>
+      <div className="flex flex-wrap gap-2">
+        {statusFlow.map((s) => (
+          <button
+            key={s}
+            onClick={() => handleChange(s)}
+            disabled={saving || s === current}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all disabled:opacity-50 ${
+              s === current
+                ? `${SC[s]} border-transparent cursor-default`
+                : "bg-white border-gray-200 text-gray-600 hover:border-(--secondary) hover:text-(--secondary)"
+            }`}
+          >
+            {s === current ? `✓ ${s}` : s}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -2010,6 +2170,360 @@ function ProfileTab({ user }) {
   );
 }
 
+// ─── Coupon form ──────────────────────────────────────────────
+function CouponForm({ initial, onSave, onClose }) {
+  const [form, setForm] = useState({
+    code: initial?.code || "",
+    discountType: initial?.discountType || "percentage",
+    discountValue: initial?.discountValue ?? "",
+    minimumOrderAmount: initial?.minimumOrderAmount ?? "",
+    maximumDiscountAmount: initial?.maximumDiscountAmount ?? "",
+    useLimit: initial?.useLimit ?? 1,
+    expiresAt: initial?.expiresAt ? new Date(initial.expiresAt).toISOString().slice(0, 10) : "",
+    isActive: initial?.isActive !== false,
+  });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
+        code: form.code.toUpperCase(),
+        discountValue: Number(form.discountValue),
+        minimumOrderAmount: form.minimumOrderAmount !== "" ? Number(form.minimumOrderAmount) : 0,
+        maximumDiscountAmount: form.maximumDiscountAmount !== "" ? Number(form.maximumDiscountAmount) : null,
+        useLimit: Number(form.useLimit),
+      };
+      await onSave(payload);
+    } catch (err) {
+      setError(
+        err?.response?.data?.errors?.[0]?.message ||
+        err?.response?.data?.message ||
+        "Save failed. Please try again."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inp = "w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all";
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {error && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{error}</div>}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Coupon Code *</label>
+          <input type="text" required value={form.code}
+            onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
+            disabled={!!initial}
+            placeholder="e.g. SAVE20"
+            className={`${inp} uppercase ${initial ? "bg-gray-50 cursor-not-allowed" : ""}`} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Discount Type *</label>
+          <select required value={form.discountType}
+            onChange={(e) => setForm({ ...form, discountType: e.target.value })}
+            className={`${inp} bg-white`}>
+            <option value="percentage">Percentage (%)</option>
+            <option value="fixed">Fixed Amount (₹)</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+            Discount Value * {form.discountType === "percentage" ? "(%)" : "(₹)"}
+          </label>
+          <input type="number" required min="1" step="0.01" value={form.discountValue}
+            onChange={(e) => setForm({ ...form, discountValue: e.target.value })}
+            placeholder={form.discountType === "percentage" ? "e.g. 20" : "e.g. 100"}
+            className={inp} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Min. Order Amount (₹)</label>
+          <input type="number" min="0" value={form.minimumOrderAmount}
+            onChange={(e) => setForm({ ...form, minimumOrderAmount: e.target.value })}
+            placeholder="0 = no minimum"
+            className={inp} />
+        </div>
+        {form.discountType === "percentage" && (
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Max Discount Cap (₹)</label>
+            <input type="number" min="0" value={form.maximumDiscountAmount}
+              onChange={(e) => setForm({ ...form, maximumDiscountAmount: e.target.value })}
+              placeholder="Leave blank for no cap"
+              className={inp} />
+          </div>
+        )}
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Total Use Limit *</label>
+          <input type="number" required min="1" value={form.useLimit}
+            onChange={(e) => setForm({ ...form, useLimit: e.target.value })}
+            placeholder="e.g. 100"
+            className={inp} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Expires On *</label>
+          <input type="date" required value={form.expiresAt}
+            onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
+            className={inp} />
+        </div>
+      </div>
+
+      {initial && (
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input type="checkbox" checked={form.isActive}
+            onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+            className="accent-(--secondary) w-4 h-4" />
+          <span className="text-sm text-gray-600">Active (visible to users)</span>
+        </label>
+      )}
+
+      <div className="flex gap-3 pt-1">
+        <button type="button" onClick={onClose}
+          className="flex-1 py-2.5 border border-(--border-light) text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">
+          Cancel
+        </button>
+        <button type="submit" disabled={saving}
+          className="flex-1 py-2.5 bg-(--accent) text-white text-sm font-semibold rounded-lg hover:bg-(--secondary) transition-colors disabled:opacity-60">
+          {saving ? "Saving..." : initial ? "Save Changes" : "Create Coupon"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ─── Manage Coupons (superadmin) ──────────────────────────────
+function ManageCoupons() {
+  const coupons = useCouponStore((s) => s.coupons);
+  const { fetchCoupons, addCoupon, editCoupon } = useCoupon();
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [toast, setToast] = useState("");
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+  const closeModal = () => { setModal(null); setSel(null); };
+
+  const load = useCallback(async () => {
+    await fetchCoupons();
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSave = async (form) => {
+    if (sel) {
+      await editCoupon(sel._id, form);
+      showToast("Coupon updated");
+    } else {
+      await addCoupon(form);
+      showToast("Coupon created");
+    }
+    closeModal();
+    fetchCoupons();
+  };
+
+  const fmt = (d) => d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+  const isExpired = (d) => d && new Date(d) < new Date();
+
+  return (
+    <div>
+      <SectionHeader title="Manage Coupons" count={coupons.length} buttonLabel="Add Coupon"
+        onAction={() => { setSel(null); setModal("edit"); }} />
+
+      <div className="px-6 py-4">
+        {loading ? (
+          <div className="space-y-3">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-14 bg-gray-100 rounded-lg animate-pulse" />)}
+          </div>
+        ) : coupons.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400">
+            <FaPercent className="text-4xl mb-3" />
+            <p className="font-semibold">No coupons yet</p>
+            <p className="text-sm mt-1">Create your first coupon to offer discounts</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[700px]">
+              <thead>
+                <tr className="border-b border-(--border-light)">
+                  {["Code", "Discount", "Min Order", "Usage", "Expires", "Status", "Actions"].map((h) => (
+                    <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider pb-3 px-3 first:pl-0 last:pr-0">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border-light)]">
+                {coupons.map((c) => (
+                  <tr key={c._id} className="hover:bg-(--surface-warm) transition-colors">
+                    <td className="py-3.5 px-3 pl-0">
+                      <span className="font-mono text-sm font-bold text-(--accent) bg-(--surface-warm) px-2 py-0.5 rounded">{c.code}</span>
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span className="text-sm font-semibold text-green-700">
+                        {c.discountType === "fixed" ? `₹${c.discountValue}` : `${c.discountValue}%`}
+                      </span>
+                      {c.maximumDiscountAmount && (
+                        <p className="text-[11px] text-gray-400">max ₹{c.maximumDiscountAmount}</p>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span className="text-sm text-gray-600">
+                        {c.minimumOrderAmount > 0 ? `₹${c.minimumOrderAmount.toLocaleString()}` : "—"}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span className="text-sm text-gray-600">{c.usedCount} / {c.useLimit}</span>
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span className={`text-sm ${isExpired(c.expiresAt) ? "text-red-500 font-semibold" : "text-gray-600"}`}>
+                        {fmt(c.expiresAt)}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                        c.isActive && !isExpired(c.expiresAt) ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
+                      }`}>
+                        {!c.isActive ? "Inactive" : isExpired(c.expiresAt) ? "Expired" : "Active"}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-3 pr-0">
+                      <button
+                        onClick={() => { setSel(c); setModal("edit"); }}
+                        className="w-8 h-8 rounded-lg bg-amber-50 text-amber-500 hover:bg-amber-100 flex items-center justify-center transition-colors"
+                        title="Edit"
+                      >
+                        <FaEdit className="text-xs" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {modal === "edit" && (
+        <Modal title={sel ? "Edit Coupon" : "Create Coupon"} onClose={closeModal} wide>
+          <CouponForm initial={sel} onSave={handleSave} onClose={closeModal} />
+        </Modal>
+      )}
+
+      {toast && <Toast message={toast} />}
+    </div>
+  );
+}
+
+// ─── Coupons tab (users — browse available coupons) ───────────
+function CouponsTab() {
+  const coupons = useCouponStore((s) => s.coupons);
+  const loading = useCouponStore((s) => s.loading);
+  const { fetchCoupons } = useCoupon();
+  const [copiedCode, setCopiedCode] = useState("");
+
+  useEffect(() => { fetchCoupons(); }, []);
+
+  const activeCoupons = coupons.filter(
+    (c) => c.isActive && new Date(c.expiresAt) > new Date() && c.usedCount < c.useLimit
+  );
+
+  const handleCopy = (code) => {
+    navigator.clipboard.writeText(code).catch(() => {});
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(""), 2000);
+  };
+
+  const daysLeft = (d) => {
+    const diff = Math.ceil((new Date(d) - new Date()) / (1000 * 60 * 60 * 24));
+    return diff;
+  };
+
+  return (
+    <div>
+      <SectionHeader title="Available Coupons" count={activeCoupons.length} />
+      <div className="px-6 py-4">
+        {loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-32 bg-gray-100 rounded-xl animate-pulse" />)}
+          </div>
+        ) : activeCoupons.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400">
+            <FaPercent className="text-4xl mb-3" />
+            <p className="font-semibold text-gray-600">No coupons available right now</p>
+            <p className="text-sm mt-1">Check back later for exciting offers!</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {activeCoupons.map((c) => {
+              const days = daysLeft(c.expiresAt);
+              const isCopied = copiedCode === c.code;
+              return (
+                <div key={c._id} className="bg-white border border-(--border-light) rounded-xl overflow-hidden hover:border-(--secondary) transition-colors">
+                  {/* Top accent bar */}
+                  <div className="h-1.5 bg-(--accent)" />
+                  <div className="p-4">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <FaPercent className="text-(--secondary) text-xs" />
+                          <span className="text-xs font-bold text-(--secondary) uppercase tracking-wide">
+                            {c.discountType === "fixed" ? "Flat Discount" : "Percentage Off"}
+                          </span>
+                        </div>
+                        <p className="text-2xl font-black text-(--accent)">
+                          {c.discountType === "fixed" ? `₹${c.discountValue}` : `${c.discountValue}%`}
+                          <span className="text-sm font-semibold text-gray-500 ml-1">OFF</span>
+                        </p>
+                        {c.maximumDiscountAmount && (
+                          <p className="text-[11px] text-gray-400 mt-0.5">
+                            Up to ₹{c.maximumDiscountAmount.toLocaleString()} discount
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className={`text-xs font-semibold ${days <= 3 ? "text-red-500" : "text-gray-400"}`}>
+                          {days === 1 ? "Expires today!" : `${days}d left`}
+                        </p>
+                      </div>
+                    </div>
+
+                    {c.minimumOrderAmount > 0 && (
+                      <p className="text-xs text-gray-500 mb-3">
+                        Min. order: <span className="font-semibold text-(--accent)">₹{c.minimumOrderAmount.toLocaleString()}</span>
+                      </p>
+                    )}
+
+                    {/* Code copy row */}
+                    <div className="flex items-center gap-2 bg-(--surface-warm) rounded-lg px-3 py-2">
+                      <span className="flex-1 font-mono text-sm font-bold text-(--accent) tracking-widest">{c.code}</span>
+                      <button
+                        onClick={() => handleCopy(c.code)}
+                        className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg transition-all ${
+                          isCopied
+                            ? "bg-green-100 text-green-700"
+                            : "bg-(--accent) text-white hover:bg-(--secondary)"
+                        }`}
+                      >
+                        {isCopied ? <FaCheck className="text-[10px]" /> : <FaClipboard className="text-[10px]" />}
+                        {isCopied ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Placeholder tab ──────────────────────────────────────────
 function PlaceholderTab({ title, icon }) {
   return (
@@ -2069,6 +2583,8 @@ export default function DashboardPage() {
       case "orders":             return isAdminRole(user?.role) ? <AdminOrdersTab /> : <MyOrdersTab />;
       case "user-management":    return <UserManagementTab />;
       case "admin-management":   return <AdminManagementTab />;
+      case "manage-coupons":     return <ManageCoupons />;
+      case "coupons":            return <CouponsTab />;
       case "cart":               return <CartTab />;
       case "wishlist":           return <PlaceholderTab title="Wishlist" icon={<FaHeart />} />;
       case "settings":           return <PlaceholderTab title="Settings" icon={<FaCog />} />;

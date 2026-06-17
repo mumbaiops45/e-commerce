@@ -1,0 +1,16 @@
+import api from "@/lib/axios";
+
+export const getAllCoupons = async () => {
+  const res = await api.get("/coupons");
+  return res.data;
+};
+
+export const createCoupon = async (data) => {
+  const res = await api.post("/coupons", data);
+  return res.data;
+};
+
+export const updateCoupon = async (id, data) => {
+  const res = await api.put(`/coupons/${id}`, data);
+  return res.data;
+};

@@ -54,9 +54,12 @@ export default function AuthPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const router = useRouter();
 
-  // Redirect if already logged in
+  // Redirect already-logged-in users to their dashboard
   useEffect(() => {
-    if (isAuthenticated) router.replace("/");
+    if (isAuthenticated) {
+      const { user } = useAuthStore.getState();
+      router.replace(dashboardPath(user));
+    }
   }, [isAuthenticated, router]);
 
   useEffect(() => {
