@@ -25,6 +25,7 @@ export default function Navbar() {
   const [hoverCat, setHoverCat] = useState(0);
   const [mobileExpandCat, setMobileExpandCat] = useState(null);
   const [slideOpen, setSlideOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
 
   const closeTimer = useRef(null);
   const router = useRouter();
@@ -66,6 +67,12 @@ export default function Navbar() {
 
   useEffect(() => () => clearTimeout(closeTimer.current), []);
 
+  const handleSearch = (e) => {
+    e.preventDefault();
+    const q = searchInput.trim();
+    router.push(q ? `/products?search=${encodeURIComponent(q)}` : "/products");
+  };
+
   async function handleLogout() {
     try { await logoutUser(); } catch {}
     logout();
@@ -99,16 +106,21 @@ export default function Navbar() {
           </div>
         </Link>
 
-        <div className="hidden md:flex items-center flex-1 max-w-xl border border-[var(--border-light)] rounded-sm overflow-hidden focus-within:border-[var(--secondary)] transition-colors">
+        <form
+          onSubmit={handleSearch}
+          className="hidden md:flex items-center flex-1 max-w-xl border border-[var(--border-light)] rounded-sm overflow-hidden focus-within:border-[var(--secondary)] transition-colors"
+        >
           <input
             type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search for anything..."
             className="w-full px-4 py-2.5 outline-none text-sm bg-white text-[var(--text-primary-l)] placeholder-gray-400"
           />
-          <button className="px-4 py-2.5 bg-[var(--secondary)] text-white hover:bg-[var(--accent)] transition-colors">
+          <button type="submit" className="px-4 py-2.5 bg-[var(--secondary)] text-white hover:bg-[var(--accent)] transition-colors">
             <FaSearch className="text-sm" />
           </button>
-        </div>
+        </form>
 
         <div className="flex items-center gap-5 text-[var(--accent)]">
 
@@ -156,10 +168,18 @@ export default function Navbar() {
 
       {/* Mobile Search */}
       <div className="md:hidden bg-white px-4 pb-3 border-b border-[var(--border-light)]">
-        <div className="flex items-center border border-[var(--border-light)] rounded-sm overflow-hidden">
-          <input type="text" placeholder="Search..." className="w-full px-3 py-2 text-sm outline-none" />
-          <button className="px-3 bg-[var(--secondary)] text-white py-2"><FaSearch className="text-sm" /></button>
-        </div>
+        <form onSubmit={handleSearch} className="flex items-center border border-(--border-light) rounded-sm overflow-hidden">
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search..."
+            className="w-full px-3 py-2 text-sm outline-none"
+          />
+          <button type="submit" className="px-3 bg-(--secondary) text-white py-2">
+            <FaSearch className="text-sm" />
+          </button>
+        </form>
       </div>
 
       {/* ── Secondary Nav ── */}

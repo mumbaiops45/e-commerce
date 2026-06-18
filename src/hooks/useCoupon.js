@@ -1,5 +1,5 @@
 import useCouponStore from "@/store/coupon.store";
-import { getAllCoupons, createCoupon, updateCoupon } from "@/routes/coupon.routes";
+import { getAllCoupons, createCoupon, updateCoupon, deleteCoupon } from "@/routes/coupon.routes";
 
 export const useCoupon = () => {
   const setCoupons = useCouponStore((s) => s.setCoupons);
@@ -26,5 +26,10 @@ export const useCoupon = () => {
     return data;
   };
 
-  return { fetchCoupons, addCoupon, editCoupon };
+  const removeCoupon = async (id) => {
+    const data = await deleteCoupon(id);
+    return data;
+  };
+
+  return { fetchCoupons, addCoupon, editCoupon, removeCoupon };
 };

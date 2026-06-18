@@ -2300,10 +2300,11 @@ function CouponForm({ initial, onSave, onClose }) {
 // ─── Manage Coupons (superadmin) ──────────────────────────────
 function ManageCoupons() {
   const coupons = useCouponStore((s) => s.coupons);
-  const { fetchCoupons, addCoupon, editCoupon } = useCoupon();
+  const { fetchCoupons, addCoupon, editCoupon, removeCoupon } = useCoupon();
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [sel, setSel] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState("");
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
@@ -2326,6 +2327,12 @@ function ManageCoupons() {
     }
     closeModal();
     fetchCoupons();
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try { await removeCoupon(sel._id); showToast("Coupon deleted"); closeModal(); fetchCoupons(); }
+    finally { setDeleting(false); }
   };
 
   const fmt = (d) => d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -2392,13 +2399,22 @@ function ManageCoupons() {
                       </span>
                     </td>
                     <td className="py-3.5 px-3 pr-0">
-                      <button
-                        onClick={() => { setSel(c); setModal("edit"); }}
-                        className="w-8 h-8 rounded-lg bg-amber-50 text-amber-500 hover:bg-amber-100 flex items-center justify-center transition-colors"
-                        title="Edit"
-                      >
-                        <FaEdit className="text-xs" />
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => { setSel(c); setModal("edit"); }}
+                          className="w-8 h-8 rounded-lg bg-amber-50 text-amber-500 hover:bg-amber-100 flex items-center justify-center transition-colors"
+                          title="Edit"
+                        >
+                          <FaEdit className="text-xs" />
+                        </button>
+                        <button
+                          onClick={() => { setSel(c); setModal("delete"); }}
+                          className="w-8 h-8 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center transition-colors"
+                          title="Delete"
+                        >
+                          <FaTrash className="text-xs" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -2412,6 +2428,10 @@ function ManageCoupons() {
         <Modal title={sel ? "Edit Coupon" : "Create Coupon"} onClose={closeModal} wide>
           <CouponForm initial={sel} onSave={handleSave} onClose={closeModal} />
         </Modal>
+      )}
+
+      {modal === "delete" && sel && (
+        <DeleteConfirm type="Coupon" name={sel.code} loading={deleting} onClose={closeModal} onConfirm={handleDelete} />
       )}
 
       {toast && <Toast message={toast} />}
