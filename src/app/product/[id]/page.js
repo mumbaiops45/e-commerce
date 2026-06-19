@@ -5,11 +5,14 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import useAuthStore from "@/store/auth.store";
 import { useCart } from "@/hooks/useCart";
+import { useWishlist } from "@/hooks/useWishlist";
+import useWishlistStore from "@/store/wishlist.store";
 import { getProductById } from "@/routes/product.routes";
 import { getProductReviews, createReview } from "@/routes/review.routes";
 import {
   FaStar, FaRegStar, FaShoppingCart, FaArrowLeft,
   FaCheck, FaImage, FaTruck, FaShieldAlt, FaTag,
+  FaRegHeart, FaHeart,
 } from "react-icons/fa";
 
 function StarRating({ rating, onRate, readonly = false }) {
@@ -45,6 +48,8 @@ export default function ProductDetailPage() {
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const { addToCart } = useCart();
+  const { addToWishlist, removeFromWishlist, fetchWishlist } = useWishlist();
+  const wishlistItems = useWishlistStore((s) => s.items);
 
   const [product, setProduct] = useState(null);
   const [reviews, setReviews] = useState([]);
@@ -52,6 +57,7 @@ export default function ProductDetailPage() {
   const [activeImg, setActiveImg] = useState(0);
   const [adding, setAdding] = useState(false);
   const [addedMsg, setAddedMsg] = useState("");
+  const [wishlistLoading, setWishlistLoading] = useState(false);
 
   // Review form
   const [rating, setRating] = useState(0);
@@ -59,6 +65,26 @@ export default function ProductDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const [reviewSuccess, setReviewSuccess] = useState("");
+
+  const wishlisted = wishlistItems.some((w) => (w.product?._id || w.product) === id);
+
+  const handleWishlist = async () => {
+    if (!isAuthenticated) { router.push("/auth"); return; }
+    setWishlistLoading(true);
+    try {
+      if (wishlisted) {
+        const entry = wishlistItems.find((w) => (w.product?._id || w.product) === id);
+        await removeFromWishlist(entry._id);
+      } else {
+        await addToWishlist(id);
+      }
+    } catch {}
+    finally { setWishlistLoading(false); }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) fetchWishlist();
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!id) return;
@@ -222,20 +248,37 @@ export default function ProductDetailPage() {
                 ))}
               </div>
 
-              {/* Add to cart */}
-              <button
-                onClick={handleAddToCart}
-                disabled={product.stock === 0 || adding}
-                className="w-full py-3.5 bg-(--accent) text-white font-bold text-sm rounded-xl hover:bg-(--secondary) transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {adding ? (
-                  <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                ) : addedMsg ? (
-                  <><FaCheck className="text-xs" /> {addedMsg}</>
-                ) : (
-                  <><FaShoppingCart className="text-xs" /> Add to Cart</>
-                )}
-              </button>
+              {/* Add to cart + Wishlist */}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAddToCart}
+                  disabled={product.stock === 0 || adding}
+                  className="flex-1 py-3.5 bg-(--accent) text-white font-bold text-sm rounded-xl hover:bg-(--secondary) transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {adding ? (
+                    <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                  ) : addedMsg ? (
+                    <><FaCheck className="text-xs" /> {addedMsg}</>
+                  ) : (
+                    <><FaShoppingCart className="text-xs" /> Add to Cart</>
+                  )}
+                </button>
+                <button
+                  onClick={handleWishlist}
+                  disabled={wishlistLoading}
+                  title={wishlisted ? "Remove from Wishlist" : "Add to Wishlist"}
+                  className={`w-12 rounded-xl border-2 flex items-center justify-center transition-colors disabled:opacity-50 ${
+                    wishlisted
+                      ? "border-(--secondary) bg-(--secondary) text-white"
+                      : "border-(--border-light) text-gray-400 hover:border-(--secondary) hover:text-(--secondary)"
+                  }`}
+                >
+                  {wishlistLoading
+                    ? <span className="w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                    : wishlisted ? <FaHeart /> : <FaRegHeart />
+                  }
+                </button>
+              </div>
             </div>
           </div>
         </div>

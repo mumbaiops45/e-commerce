@@ -18,6 +18,8 @@ import useCategoryStore from "@/store/category.store";
 import { useCategory } from "@/hooks/useCategory";
 import useCartStore from "@/store/cart.store";
 import { useCart } from "@/hooks/useCart";
+import useWishlistStore from "@/store/wishlist.store";
+import { useWishlist } from "@/hooks/useWishlist";
 
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -37,8 +39,11 @@ export default function Navbar() {
   const { fetchCategories } = useCategory();
   const cartItems = useCartStore((s) => s.items);
   const { fetchCart } = useCart();
+  const wishlistItems = useWishlistStore((s) => s.items);
+  const { fetchWishlist } = useWishlist();
 
   const cartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const wishlistCount = wishlistItems.length;
   const isUser = user?.role === "user";
 
   useEffect(() => {
@@ -46,7 +51,7 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated && isUser) fetchCart();
+    if (isAuthenticated && isUser) { fetchCart(); fetchWishlist(); }
   }, [isAuthenticated]);
 
   const openMenu = () => { clearTimeout(closeTimer.current); setCatOpen(true); };
@@ -144,10 +149,14 @@ export default function Navbar() {
             </Link>
           )}
 
-          <button className="flex items-center gap-1.5 group relative">
+          <button onClick={() => router.push("/wishlist")} className="flex items-center gap-1.5 group relative">
             <FaRegHeart className="text-base group-hover:text-[var(--secondary)] transition-colors" />
             <span className="text-[11px] font-medium hidden sm:block group-hover:text-[var(--secondary)] transition-colors">Wishlist</span>
-            <span className="absolute -top-2 -right-3 bg-[var(--secondary)] text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center">0</span>
+            {isUser && wishlistCount > 0 && (
+              <span className="absolute -top-2 -right-3 bg-[var(--secondary)] text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center">
+                {wishlistCount > 99 ? "99+" : wishlistCount}
+              </span>
+            )}
           </button>
 
           <button className="flex items-center gap-1.5 group relative" onClick={() => router.push("/user/dashboard?tab=cart")}>
