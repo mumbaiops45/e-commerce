@@ -12,6 +12,8 @@ import useCategoryStore from "@/store/category.store";
 import { useCategory } from "@/hooks/useCategory";
 import useAuthStore from "@/store/auth.store";
 import { useCart } from "@/hooks/useCart";
+import useWishlistStore from "@/store/wishlist.store";
+import { useWishlist } from "@/hooks/useWishlist";
 
 // sort value in URL → API params
 const SORT_MAP = {
@@ -98,64 +100,95 @@ function FiltersPanel({
 }
 
 // ── Product card ──────────────────────────────────────────────────────────────
-function ProductCard({ product, onAddToCart, adding, wishlisted, onToggleWish }) {
+function ProductCard({ product, onAddToCart, adding, wishlisted, wishlistLoading, onToggleWish }) {
   const img = product.images?.[0];
   return (
-    <div className="bg-white rounded-xl overflow-hidden border border-(--border-light) group hover:shadow-xl transition-shadow duration-300 flex flex-col">
-      <Link href={`/product/${product._id}`} className="relative aspect-square overflow-hidden bg-gray-50 block">
+    <div className="group bg-white rounded-2xl overflow-hidden border border-(--border-light) hover:border-(--secondary)/40 hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+      {/* Image area */}
+      <div className="relative aspect-[4/3] overflow-hidden bg-gray-50">
         <img
           src={img?.url || `https://picsum.photos/seed/${product._id}/400/400`}
           alt={img?.alt || product.title}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
-        {product.isFeatured && (
-          <span className="absolute top-3 left-3 bg-(--accent) text-white text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wide">
-            Featured
-          </span>
-        )}
-        <button
-          onClick={(e) => { e.preventDefault(); onToggleWish(product._id); }}
-          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white shadow-md flex items-center justify-center hover:bg-(--primary) transition-colors"
-        >
-          {wishlisted
-            ? <FaHeart className="text-sm text-(--accent)" />
-            : <FaRegHeart className="text-sm text-gray-400" />}
-        </button>
-      </Link>
 
-      <div className="p-4 flex flex-col flex-1">
-        <p className="text-[10px] font-semibold text-(--secondary) uppercase tracking-wider mb-1">{product.brand}</p>
-        <Link href={`/product/${product._id}`} className="flex-1">
-          <h3 className="text-sm font-semibold text-(--accent) leading-snug line-clamp-2">{product.title}</h3>
-        </Link>
+        {/* Gradient overlay on hover */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-        {product.numReviews > 0 && (
-          <div className="flex items-center gap-1.5 mt-2">
-            <div className="flex items-center gap-0.5">
-              {[...Array(5)].map((_, i) => (
-                <FaStar key={i} className={`text-[10px] ${i < Math.round(product.averageRating) ? "text-amber-400" : "text-gray-200"}`} />
-              ))}
-            </div>
-            <span className="text-[11px] text-gray-400">({product.numReviews})</span>
+        {/* Badges */}
+        <div className="absolute top-3 left-3 flex flex-col gap-1.5">
+          {product.isFeatured && (
+            <span className="bg-(--accent) text-white text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest shadow">
+              Featured
+            </span>
+          )}
+          {product.stock > 0 && product.stock <= 5 && (
+            <span className="bg-orange-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wide shadow">
+              Only {product.stock} left
+            </span>
+          )}
+        </div>
+
+        {/* Out of stock overlay */}
+        {product.stock === 0 && (
+          <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
+            <span className="bg-gray-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-full tracking-wide">
+              Out of Stock
+            </span>
           </div>
         )}
 
-        <div className="flex items-baseline gap-2 mt-2">
-          <span className="text-lg font-extrabold text-(--accent)">₹{product.price?.toLocaleString()}</span>
-          {product.stock === 0 && <span className="text-xs text-red-500 font-semibold">Out of stock</span>}
+        {/* Wishlist button */}
+        <button
+          onClick={(e) => { e.preventDefault(); onToggleWish(product._id); }}
+          disabled={wishlistLoading}
+          className="absolute top-3 right-3 w-9 h-9 rounded-full bg-white shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-200 disabled:opacity-60 z-10"
+        >
+          {wishlisted
+            ? <FaHeart className="text-sm text-red-500" />
+            : <FaRegHeart className="text-sm text-gray-400" />}
+        </button>
+
+        {/* View product pill */}
+        <Link
+          href={`/product/${product._id}`}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap bg-white text-(--accent) text-[11px] font-bold px-4 py-1.5 rounded-full shadow-lg opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-300 z-10"
+        >
+          View Product →
+        </Link>
+      </div>
+
+      {/* Content */}
+      <div className="p-4 flex flex-col flex-1">
+        <p className="text-[9px] font-black text-(--secondary) uppercase tracking-widest mb-1">{product.brand}</p>
+        <Link href={`/product/${product._id}`} className="flex-1">
+          <h3 className="text-sm font-semibold text-(--accent) leading-snug line-clamp-2 hover:text-(--secondary) transition-colors">
+            {product.title}
+          </h3>
+        </Link>
+
+        {product.numReviews > 0 && (
+          <div className="flex items-center gap-1 mt-2">
+            {[...Array(5)].map((_, i) => (
+              <FaStar key={i} className={`text-[10px] ${i < Math.round(product.averageRating) ? "text-amber-400" : "text-gray-200"}`} />
+            ))}
+            <span className="text-[11px] text-gray-400 font-medium ml-0.5">({product.numReviews})</span>
+          </div>
+        )}
+
+        <div className="mt-2 mb-3">
+          <span className="text-xl font-black text-(--accent)">₹{product.price?.toLocaleString()}</span>
         </div>
 
         <button
           onClick={() => onAddToCart(product._id)}
           disabled={product.stock === 0 || adding}
-          className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 bg-(--secondary) text-white text-xs font-bold rounded-lg hover:bg-(--accent) transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full flex items-center justify-center gap-2 py-2.5 bg-(--accent) text-white text-xs font-bold rounded-xl hover:bg-(--secondary) active:scale-95 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm hover:shadow-md"
         >
-          {adding ? (
-            <span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
-          ) : (
-            <FaShoppingCart className="text-xs" />
-          )}
-          {adding ? "Adding..." : product.stock === 0 ? "Out of Stock" : "Add to Cart"}
+          {adding
+            ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+            : <FaShoppingCart className="text-xs" />}
+          {adding ? "Adding…" : product.stock === 0 ? "Out of Stock" : "Add to Cart"}
         </button>
       </div>
     </div>
@@ -176,7 +209,9 @@ function ProductsContent() {
   const [loading, setLoading] = useState(true);
   const [addingId, setAddingId] = useState(null);
   const [cartToast, setCartToast] = useState("");
-  const [wishlisted, setWishlisted] = useState({});
+  const [wishlistLoading, setWishlistLoading] = useState({});
+  const wishlistItems = useWishlistStore((s) => s.items);
+  const { addToWishlist, removeFromWishlist, fetchWishlist } = useWishlist();
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [localMin, setLocalMin] = useState("");
   const [localMax, setLocalMax] = useState("");
@@ -199,7 +234,25 @@ function ProductsContent() {
 
   useEffect(() => {
     if (categories.length === 0) fetchCategories({ limit: 50 });
-  }, []);
+    if (isAuthenticated) fetchWishlist();
+  }, [isAuthenticated]);
+
+  const isWishlisted = (productId) => wishlistItems.some((w) => (w.product?._id || w.product) === productId);
+
+  const handleToggleWish = async (productId) => {
+    if (!isAuthenticated) { router.push("/auth"); return; }
+    setWishlistLoading((p) => ({ ...p, [productId]: true }));
+    try {
+      if (isWishlisted(productId)) {
+        const entry = wishlistItems.find((w) => (w.product?._id || w.product) === productId);
+        await removeFromWishlist(entry._id);
+      } else {
+        await addToWishlist(productId);
+      }
+    } finally {
+      setWishlistLoading((p) => ({ ...p, [productId]: false }));
+    }
+  };
 
   // Push URL helper — resets page unless explicitly provided
   const push = useCallback((updates) => {
@@ -454,8 +507,9 @@ function ProductsContent() {
                       product={product}
                       onAddToCart={handleAddToCart}
                       adding={addingId === product._id}
-                      wishlisted={!!wishlisted[product._id]}
-                      onToggleWish={(id) => setWishlisted((p) => ({ ...p, [id]: !p[id] }))}
+                      wishlisted={isWishlisted(product._id)}
+                      wishlistLoading={!!wishlistLoading[product._id]}
+                      onToggleWish={handleToggleWish}
                     />
                   ))}
                 </div>

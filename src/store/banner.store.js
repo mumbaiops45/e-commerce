@@ -1,12 +1,13 @@
 import { create } from "zustand";
 
 const useBannerStore = create((set) => ({
-  banners: [],
+  heroBanners: [],
+  middleBanners: [],
   loading: false,
 
-  setBanners: (banners) => set({ banners: banners || [] }),
+  setHeroBanners: (banners) => set({ heroBanners: banners || [] }),
+  setMiddleBanners: (banners) => set({ middleBanners: banners || [] }),
   setLoading: (loading) => set({ loading }),
-  resetBanners: () => set({ banners: [] }),
 }));
 
 export default useBannerStore;

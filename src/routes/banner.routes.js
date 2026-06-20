@@ -1,12 +1,12 @@
 import api from "@/lib/axios";
 
-export const getBanners = async () => {
-  const res = await api.get("/banner");
+export const getHeroBanners = async () => {
+  const res = await api.get("/banner/hero");
   return res.data;
 };
 
-export const getBannerById = async (id) => {
-  const res = await api.get(`/banner/${id}`);
+export const getMiddleBanners = async () => {
+  const res = await api.get("/banner/middle");
   return res.data;
 };
 

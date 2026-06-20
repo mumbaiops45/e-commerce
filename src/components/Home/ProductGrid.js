@@ -12,6 +12,8 @@ import { useProduct } from "@/hooks/useProduct";
 import { useCategory } from "@/hooks/useCategory";
 import useAuthStore from "@/store/auth.store";
 import { useCart } from "@/hooks/useCart";
+import useWishlistStore from "@/store/wishlist.store";
+import { useWishlist } from "@/hooks/useWishlist";
 
 const PER_PAGE = 8;
 
@@ -21,7 +23,6 @@ export default function ProductGrid() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("All");
   const [activeCatId, setActiveCatId] = useState(null);
-  const [wishlisted, setWishlisted] = useState({});
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -34,10 +35,14 @@ export default function ProductGrid() {
   const { fetchCategories } = useCategory();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const { addToCart } = useCart();
+  const wishlistItems = useWishlistStore((s) => s.items);
+  const { addToWishlist, removeFromWishlist, fetchWishlist } = useWishlist();
+  const [wishlistLoading, setWishlistLoading] = useState({});
 
   useEffect(() => {
     fetchCategories({ limit: 20 });
-  }, []);
+    if (isAuthenticated) fetchWishlist();
+  }, [isAuthenticated]);
 
   const loadProducts = useCallback((categoryId, p = 1) => {
     setLoading(true);
@@ -100,7 +105,22 @@ export default function ProductGrid() {
     gsap.from(cards, { opacity: 0, y: 30, stagger: 0.07, duration: 0.5, ease: "power2.out" });
   }, [products, loading]);
 
-  const toggleWish = (id) => setWishlisted((prev) => ({ ...prev, [id]: !prev[id] }));
+  const isWishlisted = (productId) => wishlistItems.some((w) => (w.product?._id || w.product) === productId);
+
+  const toggleWish = async (productId) => {
+    if (!isAuthenticated) { router.push("/auth"); return; }
+    setWishlistLoading((p) => ({ ...p, [productId]: true }));
+    try {
+      if (isWishlisted(productId)) {
+        const entry = wishlistItems.find((w) => (w.product?._id || w.product) === productId);
+        await removeFromWishlist(entry._id);
+      } else {
+        await addToWishlist(productId);
+      }
+    } finally {
+      setWishlistLoading((p) => ({ ...p, [productId]: false }));
+    }
+  };
 
   const tabs = [{ label: "All", id: null }, ...categories.map((c) => ({ label: c.name, id: c._id }))];
 
@@ -135,12 +155,14 @@ export default function ProductGrid() {
         {loading ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
             {[...Array(PER_PAGE)].map((_, i) => (
-              <div key={i} className="bg-white rounded-b-xl overflow-hidden border border-(--border-light) animate-pulse">
-                <div className="aspect-square bg-gray-100" />
-                <div className="p-4 space-y-2">
+              <div key={i} className="bg-white rounded-2xl overflow-hidden border border-(--border-light) animate-pulse">
+                <div className="aspect-[4/3] bg-gray-100" />
+                <div className="p-4 space-y-2.5">
+                  <div className="h-2.5 bg-gray-100 rounded-full w-1/3" />
                   <div className="h-4 bg-gray-100 rounded w-3/4" />
                   <div className="h-3 bg-gray-100 rounded w-1/2" />
-                  <div className="h-5 bg-gray-100 rounded w-1/3" />
+                  <div className="h-6 bg-gray-100 rounded w-1/3 mt-1" />
+                  <div className="h-9 bg-gray-100 rounded-xl mt-2" />
                 </div>
               </div>
             ))}
@@ -155,73 +177,96 @@ export default function ProductGrid() {
               return (
                 <div
                   key={product._id}
-                  className="prod-card relative bg-white rounded-b-xl overflow-hidden border border-(--border-light) group hover:shadow-xl transition-shadow duration-300 flex flex-col"
+                  className="prod-card group bg-white rounded-2xl overflow-hidden border border-(--border-light) hover:border-(--secondary)/40 hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col"
                 >
-                  <Link href={`/product/${product._id}`} className="absolute inset-0 z-0" aria-label={product.title} />
-                  <div className="relative aspect-square overflow-hidden bg-gray-50">
+                  {/* Image */}
+                  <div className="relative aspect-[4/3] overflow-hidden bg-gray-50">
                     <img
                       src={img?.url || `https://picsum.photos/seed/${product._id}/400/400`}
                       alt={img?.alt || product.title}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                     />
-                    {product.isFeatured && (
-                      <span className="absolute top-3 left-3 bg-(--accent) text-white text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wide">
-                        Featured
-                      </span>
-                    )}
-                    <button
-                      onClick={() => toggleWish(product._id)}
-                      className="relative z-10 absolute top-3 right-3 w-8 h-8 rounded-full bg-white shadow-md flex items-center justify-center hover:bg-(--primary) transition-colors"
-                    >
-                      {wishlisted[product._id]
-                        ? <FaHeart className="text-sm text-(--accent)" />
-                        : <FaRegHeart className="text-sm text-gray-400" />}
-                    </button>
-                  </div>
 
-                  <div className="p-4 flex flex-col flex-1">
-                    <p className="text-[10px] font-semibold text-(--secondary) uppercase tracking-wider mb-1">
-                      {product.brand}
-                    </p>
-                    <h3 className="text-sm font-semibold text-(--accent) leading-snug line-clamp-2 flex-1">
-                      {product.title}
-                    </h3>
+                    {/* Hover overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-                    {product.numReviews > 0 && (
-                      <div className="flex items-center gap-1.5 mt-2">
-                        <div className="flex items-center gap-0.5">
-                          {[...Array(5)].map((_, i) => (
-                            <FaStar
-                              key={i}
-                              className={`text-[10px] ${i < Math.round(product.averageRating) ? "text-amber-400" : "text-gray-200"}`}
-                            />
-                          ))}
-                        </div>
-                        <span className="text-[11px] text-gray-400">({product.numReviews})</span>
-                      </div>
-                    )}
-
-                    <div className="flex items-baseline gap-2 mt-2">
-                      <span className="text-lg font-extrabold text-(--accent)">₹{product.price}</span>
-                      {product.stock === 0 && (
-                        <span className="text-xs text-red-500 font-semibold">Out of stock</span>
+                    {/* Badges */}
+                    <div className="absolute top-3 left-3 flex flex-col gap-1.5">
+                      {product.isFeatured && (
+                        <span className="bg-(--accent) text-white text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest shadow">
+                          Featured
+                        </span>
+                      )}
+                      {product.stock > 0 && product.stock <= 5 && (
+                        <span className="bg-orange-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wide shadow">
+                          Only {product.stock} left
+                        </span>
                       )}
                     </div>
 
-                    <div className="relative z-10 flex gap-2 mt-3">
-                      <button
-                        onClick={() => handleAddToCart(product._id)}
-                        disabled={product.stock === 0 || isAdding}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-(--secondary) text-white text-xs font-bold rounded-lg hover:bg-(--accent) transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {isAdding ? (
-                          <span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                        ) : (
-                          <FaShoppingCart className="text-xs" />
-                        )}
-                        {isAdding ? "Adding..." : "Add to Cart"}
-                      </button>
+                    {/* Out of stock overlay */}
+                    {product.stock === 0 && (
+                      <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
+                        <span className="bg-gray-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-full tracking-wide">
+                          Out of Stock
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Wishlist button */}
+                    <button
+                      onClick={() => toggleWish(product._id)}
+                      disabled={wishlistLoading[product._id]}
+                      className="absolute top-3 right-3 w-9 h-9 rounded-full bg-white shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-200 disabled:opacity-60 z-10"
+                    >
+                      {isWishlisted(product._id)
+                        ? <FaHeart className="text-sm text-red-500" />
+                        : <FaRegHeart className="text-sm text-gray-400" />}
+                    </button>
+
+                    {/* View product pill on hover */}
+                    <Link
+                      href={`/product/${product._id}`}
+                      className="absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap bg-white text-(--accent) text-[11px] font-bold px-4 py-1.5 rounded-full shadow-lg opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-300 z-10"
+                    >
+                      View Product →
+                    </Link>
+                  </div>
+
+                  {/* Content */}
+                  <div className="p-4 flex flex-col flex-1">
+                    <p className="text-[9px] font-black text-(--secondary) uppercase tracking-widest mb-1">
+                      {product.brand}
+                    </p>
+                    <Link href={`/product/${product._id}`} className="flex-1">
+                      <h3 className="text-sm font-semibold text-(--accent) leading-snug line-clamp-2 hover:text-(--secondary) transition-colors">
+                        {product.title}
+                      </h3>
+                    </Link>
+
+                    {product.numReviews > 0 && (
+                      <div className="flex items-center gap-1 mt-2">
+                        {[...Array(5)].map((_, i) => (
+                          <FaStar key={i} className={`text-[10px] ${i < Math.round(product.averageRating) ? "text-amber-400" : "text-gray-200"}`} />
+                        ))}
+                        <span className="text-[11px] text-gray-400 font-medium ml-0.5">({product.numReviews})</span>
+                      </div>
+                    )}
+
+                    <div className="mt-2 mb-3">
+                      <span className="text-xl font-black text-(--accent)">₹{product.price?.toLocaleString()}</span>
                     </div>
+
+                    <button
+                      onClick={() => handleAddToCart(product._id)}
+                      disabled={product.stock === 0 || isAdding}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-(--accent) text-white text-xs font-bold rounded-xl hover:bg-(--secondary) active:scale-95 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm hover:shadow-md"
+                    >
+                      {isAdding
+                        ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                        : <FaShoppingCart className="text-xs" />}
+                      {isAdding ? "Adding…" : product.stock === 0 ? "Out of Stock" : "Add to Cart"}
+                    </button>
                   </div>
                 </div>
               );

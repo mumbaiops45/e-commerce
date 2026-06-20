@@ -21,6 +21,12 @@ import { getMyOrders, getAllOrdersAdmin, updateOrder } from "@/routes/order.rout
 import { createPaymentOrder, verifyPayment } from "@/routes/payment.routes";
 import useCouponStore from "@/store/coupon.store";
 import { useCoupon } from "@/hooks/useCoupon";
+import useWishlistStore from "@/store/wishlist.store";
+import { useWishlist } from "@/hooks/useWishlist";
+import useBannerStore from "@/store/banner.store";
+import { useBanner } from "@/hooks/useBanner";
+import useShippingStore from "@/store/shipping.store";
+import { useShipping } from "@/hooks/useShipping";
 
 const isAdminRole = (role) => role === "admin" || role === "superadmin";
 
@@ -117,6 +123,8 @@ function Sidebar({ user, activeTab, onTabChange, onLogout, mobileOpen, onMobileC
                 <NavItem id="user-management" icon={<FaUsers className="text-xs shrink-0" />} label="Users" />
                 <NavItem id="admin-management" icon={<FaUserShield className="text-xs shrink-0" />} label="Admins" />
                 <NavItem id="manage-coupons" icon={<FaPercent className="text-xs shrink-0" />} label="Manage Coupons" />
+                <NavItem id="manage-banners" icon={<FaImage className="text-xs shrink-0" />} label="Banners" />
+                <NavItem id="manage-shipping" icon={<FaTruck className="text-xs shrink-0" />} label="Shipping Config" />
               </>
             )}
 
@@ -2544,6 +2552,412 @@ function CouponsTab() {
   );
 }
 
+// ─── Wishlist tab (user) ──────────────────────────────────────
+function WishlistTab() {
+  const items = useWishlistStore((s) => s.items);
+  const loading = useWishlistStore((s) => s.loading);
+  const { fetchWishlist, removeFromWishlist } = useWishlist();
+  const { addToCart } = useCart();
+  const router = useRouter();
+  const [toast, setToast] = useState("");
+  const [removingId, setRemovingId] = useState(null);
+  const [addingId, setAddingId] = useState(null);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+
+  useEffect(() => { fetchWishlist(); }, []);
+
+  const handleRemove = async (id) => {
+    setRemovingId(id);
+    try { await removeFromWishlist(id); showToast("Removed from wishlist"); }
+    finally { setRemovingId(null); }
+  };
+
+  const handleAddToCart = async (productId) => {
+    setAddingId(productId);
+    try { await addToCart(productId, 1); showToast("Added to cart!"); }
+    catch { showToast("Failed to add to cart"); }
+    finally { setAddingId(null); }
+  };
+
+  return (
+    <div>
+      <SectionHeader title="My Wishlist" count={items.length > 0 ? items.length : undefined} />
+      <div className="px-6 py-4">
+        {loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-40 bg-gray-100 rounded-xl animate-pulse" />)}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400">
+            <FaHeart className="text-4xl mb-3" />
+            <p className="font-semibold text-gray-600">Your wishlist is empty</p>
+            <p className="text-sm mt-1">Save products you love to find them here.</p>
+            <button
+              onClick={() => router.push("/products")}
+              className="mt-4 px-5 py-2 bg-(--accent) text-white text-sm font-semibold rounded-lg hover:bg-(--secondary) transition-colors"
+            >
+              Browse Products
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {items.map((item) => {
+              const product = item.product || item;
+              const image = product.images?.[0]?.url;
+              return (
+                <div key={item._id} className="bg-white border border-(--border-light) rounded-xl overflow-hidden group flex flex-col hover:border-(--secondary) transition-colors">
+                  <div
+                    className="relative h-44 overflow-hidden bg-gray-50 cursor-pointer"
+                    onClick={() => router.push(`/product/${product._id}`)}
+                  >
+                    {image
+                      ? <img src={image} alt={product.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                      : <div className="w-full h-full flex items-center justify-center text-gray-300"><FaImage className="text-4xl" /></div>
+                    }
+                  </div>
+                  <div className="p-4 flex flex-col flex-1">
+                    <p className="text-[10px] font-bold text-(--secondary) uppercase tracking-wider mb-0.5">{product.brand}</p>
+                    <p
+                      className="text-sm font-bold text-(--accent) line-clamp-2 mb-1 cursor-pointer hover:text-(--secondary) transition-colors"
+                      onClick={() => router.push(`/product/${product._id}`)}
+                    >
+                      {product.title}
+                    </p>
+                    <p className="text-base font-extrabold text-(--accent) mb-3">₹{product.price?.toLocaleString()}</p>
+                    <div className="flex gap-2 mt-auto">
+                      <button
+                        onClick={() => handleAddToCart(product._id)}
+                        disabled={addingId === product._id}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-(--accent) text-white text-xs font-semibold rounded-lg hover:bg-(--secondary) transition-colors disabled:opacity-60"
+                      >
+                        <FaShoppingCart className="text-[10px]" />
+                        {addingId === product._id ? "Adding…" : "Add to Cart"}
+                      </button>
+                      <button
+                        onClick={() => handleRemove(item._id)}
+                        disabled={removingId === item._id}
+                        className="w-9 h-9 flex items-center justify-center rounded-lg border border-red-100 text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-50"
+                        title="Remove"
+                      >
+                        <FaTrash className="text-xs" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {toast && <Toast message={toast} />}
+    </div>
+  );
+}
+
+// ─── Manage Banners (superadmin) ──────────────────────────────
+function ManageBanners() {
+  const heroBanners = useBannerStore((s) => s.heroBanners);
+  const middleBanners = useBannerStore((s) => s.middleBanners);
+  const loading = useBannerStore((s) => s.loading);
+  const { fetchAllBanners, createBanner, updateBanner, deleteBanner } = useBanner();
+  const [modal, setModal] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState("");
+  const [activeType, setActiveType] = useState("hero");
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+  const closeModal = () => { setModal(null); setSel(null); };
+
+  useEffect(() => { fetchAllBanners(); }, []);
+
+  const allBanners = activeType === "hero" ? heroBanners : middleBanners;
+
+  const BannerForm = ({ initial, onClose }) => {
+    const [form, setForm] = useState({
+      title: initial?.title || "",
+      subtitle: initial?.subtitle || "",
+      image: initial?.image || "",
+      link: initial?.link || "",
+      type: initial?.type || activeType,
+      serialNo: initial?.serialNo ?? 1,
+      isActive: initial?.isActive !== false,
+    });
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState("");
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      setError("");
+      setSaving(true);
+      try {
+        if (initial) { await updateBanner(initial._id, form); showToast("Banner updated"); }
+        else { await createBanner(form); showToast("Banner created"); }
+        onClose();
+      } catch (err) {
+        setError(err?.response?.data?.message || "Save failed");
+      } finally { setSaving(false); }
+    };
+
+    const inp = "w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all";
+
+    return (
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{error}</div>}
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Title *</label>
+          <input type="text" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Banner title" className={inp} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Subtitle</label>
+          <input type="text" value={form.subtitle} onChange={(e) => setForm({ ...form, subtitle: e.target.value })} placeholder="Short description" className={inp} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Image URL *</label>
+          <input type="url" required value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="https://..." className={inp} />
+          {form.image && <img src={form.image} alt="preview" className="mt-2 h-24 w-full object-cover rounded-lg border border-(--border-light)" />}
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Link URL</label>
+          <input type="text" value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="/products or https://..." className={inp} />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Type *</label>
+            <select required value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={`${inp} bg-white`}>
+              <option value="hero">Hero</option>
+              <option value="middle">Middle</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Order (serialNo)</label>
+            <input type="number" min="1" value={form.serialNo} onChange={(e) => setForm({ ...form, serialNo: Number(e.target.value) })} className={inp} />
+          </div>
+        </div>
+        {initial && (
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} className="accent-(--secondary) w-4 h-4" />
+            <span className="text-sm text-gray-600">Active (visible on site)</span>
+          </label>
+        )}
+        <div className="flex gap-3 pt-1">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 border border-(--border-light) text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50">Cancel</button>
+          <button type="submit" disabled={saving} className="flex-1 py-2.5 bg-(--accent) text-white text-sm font-semibold rounded-lg hover:bg-(--secondary) disabled:opacity-60">
+            {saving ? "Saving…" : initial ? "Save Changes" : "Create Banner"}
+          </button>
+        </div>
+      </form>
+    );
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try { await deleteBanner(sel._id); showToast("Banner deleted"); closeModal(); }
+    finally { setDeleting(false); }
+  };
+
+  return (
+    <div>
+      <SectionHeader title="Manage Banners" count={heroBanners.length + middleBanners.length} buttonLabel="Add Banner"
+        onAction={() => { setSel(null); setModal("edit"); }} />
+      <div className="px-6 py-4">
+        <div className="flex gap-2 mb-5">
+          {["hero", "middle"].map((t) => (
+            <button key={t} onClick={() => setActiveType(t)}
+              className={`px-4 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${
+                activeType === t ? "bg-(--accent) text-white" : "bg-white border border-(--border-light) text-gray-600 hover:border-(--secondary)"
+              }`}>
+              {t} Banners ({t === "hero" ? heroBanners.length : middleBanners.length})
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse" />)}</div>
+        ) : allBanners.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400">
+            <FaImage className="text-4xl mb-3" />
+            <p className="font-semibold">No {activeType} banners yet</p>
+            <p className="text-sm mt-1">Create your first banner using the button above.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {allBanners.map((b) => (
+              <div key={b._id} className="bg-white border border-(--border-light) rounded-xl overflow-hidden hover:border-(--secondary) transition-colors group">
+                {b.image && <img src={b.image} alt={b.title} className="w-full h-36 object-cover" />}
+                {!b.image && <div className="w-full h-24 bg-(--surface-warm) flex items-center justify-center text-gray-300"><FaImage className="text-3xl" /></div>}
+                <div className="p-3">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-(--accent) line-clamp-1">{b.title}</p>
+                      {b.subtitle && <p className="text-xs text-gray-500 line-clamp-1">{b.subtitle}</p>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${b.isActive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
+                        {b.isActive ? "Active" : "Inactive"}
+                      </span>
+                      <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-semibold">#{b.serialNo}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setSel(b); setModal("edit"); }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold bg-amber-50 text-amber-600 hover:bg-amber-100 rounded-lg transition-colors">
+                      <FaEdit className="text-[10px]" /> Edit
+                    </button>
+                    <button onClick={() => { setSel(b); setModal("delete"); }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold bg-red-50 text-red-500 hover:bg-red-100 rounded-lg transition-colors">
+                      <FaTrash className="text-[10px]" /> Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {modal === "edit" && (
+        <Modal title={sel ? "Edit Banner" : "Create Banner"} onClose={closeModal} wide>
+          <BannerForm initial={sel} onClose={closeModal} />
+        </Modal>
+      )}
+      {modal === "delete" && sel && (
+        <DeleteConfirm type="Banner" name={sel.title} loading={deleting} onClose={closeModal} onConfirm={handleDelete} />
+      )}
+      {toast && <Toast message={toast} />}
+    </div>
+  );
+}
+
+// ─── Manage Shipping (superadmin) ─────────────────────────────
+function ManageShipping() {
+  const config = useShippingStore((s) => s.config);
+  const loading = useShippingStore((s) => s.loading);
+  const { fetchShipping, createShipping, updateShipping } = useShipping();
+  const [mode, setMode] = useState("view");
+  const [form, setForm] = useState({ freeShippingThreshold: "", standardRate: "", expressRate: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+
+  useEffect(() => { fetchShipping(); }, []);
+
+  useEffect(() => {
+    if (config) {
+      setForm({
+        freeShippingThreshold: config.freeShippingThreshold ?? "",
+        standardRate: config.standardRate ?? "",
+        expressRate: config.expressRate ?? "",
+      });
+    }
+  }, [config]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSaving(true);
+    try {
+      const payload = {
+        freeShippingThreshold: Number(form.freeShippingThreshold),
+        standardRate: Number(form.standardRate),
+        ...(form.expressRate !== "" && { expressRate: Number(form.expressRate) }),
+      };
+      if (config) { await updateShipping(config._id, payload); showToast("Shipping config updated"); }
+      else { await createShipping(payload); showToast("Shipping config created"); }
+      setMode("view");
+    } catch (err) {
+      setError(err?.response?.data?.message || "Save failed");
+    } finally { setSaving(false); }
+  };
+
+  const inp = "w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all";
+
+  return (
+    <div>
+      <SectionHeader title="Shipping Configuration" />
+      <div className="px-6 py-6 max-w-xl">
+        {loading ? (
+          <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />)}</div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-(--border-light) overflow-hidden">
+            <div className="bg-(--accent) px-6 py-5 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                <FaTruck className="text-white text-lg" />
+              </div>
+              <div>
+                <p className="text-white font-bold">Shipping Settings</p>
+                <p className="text-white/70 text-xs">{config ? "Config active" : "No config yet — create one below"}</p>
+              </div>
+            </div>
+
+            {mode === "view" && config ? (
+              <div className="p-6">
+                <div className="space-y-0 mb-5">
+                  {[
+                    ["Free Shipping Above", `₹${config.freeShippingThreshold?.toLocaleString() ?? "—"}`],
+                    ["Standard Shipping Rate", `₹${config.standardRate?.toLocaleString() ?? "—"}`],
+                    ["Express Shipping Rate", config.expressRate != null ? `₹${config.expressRate?.toLocaleString()}` : "Not set"],
+                  ].map(([l, v]) => (
+                    <div key={l} className="flex items-center justify-between py-3 border-b border-(--border-light) last:border-0">
+                      <span className="text-sm text-gray-500 font-medium">{l}</span>
+                      <span className="text-sm font-bold text-(--accent)">{v}</span>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setMode("edit")}
+                  className="w-full py-2.5 bg-(--accent) text-white text-sm font-semibold rounded-xl hover:bg-(--secondary) transition-colors flex items-center justify-center gap-2"
+                >
+                  <FaEdit className="text-xs" /> Edit Configuration
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                {error && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{error}</div>}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">Free Shipping Above (₹) *</label>
+                  <input type="number" required min="0" value={form.freeShippingThreshold}
+                    onChange={(e) => setForm({ ...form, freeShippingThreshold: e.target.value })}
+                    placeholder="e.g. 2500" className={inp} />
+                  <p className="text-[11px] text-gray-400 mt-1">Orders above this amount get free shipping</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">Standard Shipping Rate (₹) *</label>
+                  <input type="number" required min="0" value={form.standardRate}
+                    onChange={(e) => setForm({ ...form, standardRate: e.target.value })}
+                    placeholder="e.g. 99" className={inp} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">Express Shipping Rate (₹)</label>
+                  <input type="number" min="0" value={form.expressRate}
+                    onChange={(e) => setForm({ ...form, expressRate: e.target.value })}
+                    placeholder="Leave blank if not offered" className={inp} />
+                </div>
+                <div className="flex gap-3 pt-1">
+                  {config && (
+                    <button type="button" onClick={() => setMode("view")}
+                      className="flex-1 py-2.5 border border-(--border-light) text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-colors">
+                      Cancel
+                    </button>
+                  )}
+                  <button type="submit" disabled={saving}
+                    className="flex-1 py-2.5 bg-(--accent) text-white text-sm font-semibold rounded-xl hover:bg-(--secondary) transition-colors disabled:opacity-60">
+                    {saving ? "Saving…" : config ? "Save Changes" : "Create Config"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+      </div>
+      {toast && <Toast message={toast} />}
+    </div>
+  );
+}
+
 // ─── Placeholder tab ──────────────────────────────────────────
 function PlaceholderTab({ title, icon }) {
   return (
@@ -2604,9 +3018,11 @@ export default function DashboardPage() {
       case "user-management":    return <UserManagementTab />;
       case "admin-management":   return <AdminManagementTab />;
       case "manage-coupons":     return <ManageCoupons />;
+      case "manage-banners":     return <ManageBanners />;
+      case "manage-shipping":    return <ManageShipping />;
       case "coupons":            return <CouponsTab />;
       case "cart":               return <CartTab />;
-      case "wishlist":           return <PlaceholderTab title="Wishlist" icon={<FaHeart />} />;
+      case "wishlist":           return <WishlistTab />;
       case "settings":           return <PlaceholderTab title="Settings" icon={<FaCog />} />;
       default:                   return <ProfileTab user={user} />;
     }
