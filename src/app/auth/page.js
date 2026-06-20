@@ -100,9 +100,7 @@ export default function AuthPage() {
     setError("");
     const fd = new FormData(e.target);
     try {
-      const res = await login({ email: fd.get("email"), password: fd.get("password") });
-      localStorage.setItem("token", res.data.token);  // ADD THIS
-localStorage.setItem("user", JSON.stringify(res.data.user));  // ADD THIS
+      await login({ email: fd.get("email"), password: fd.get("password") });
       const { user } = useAuthStore.getState();
       router.push(dashboardPath(user));
     } catch (err) {
@@ -121,7 +119,6 @@ localStorage.setItem("user", JSON.stringify(res.data.user));  // ADD THIS
         phone: fd.get("mobile"),
         password: fd.get("password"),
       });
-      
       setSuccessMsg(data.message || "Registered successfully!");
       const { user } = useAuthStore.getState();
       setTimeout(() => router.push(dashboardPath(user)), 1800);
