@@ -37,11 +37,17 @@ h4 { font-size: 16px; font-weight: 600; line-height: 1.35; }
 h5, h6 { font-size: 14px; font-weight: 500; line-height: 1.40; }
 strong { font-weight: 700; }
 
-/* ─── Scrollbar ─── */
+/* ─── Scrollbar (global) ─── */
 ::-webkit-scrollbar        { width: 4px; }
-::-webkit-scrollbar-track  { background: var(--primary); }
+::-webkit-scrollbar-track  { background: transparent; }
 ::-webkit-scrollbar-thumb  { background: var(--secondary); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* ─── Sidebar scrollbar ─── */
+aside::-webkit-scrollbar       { width: 3px; }
+aside::-webkit-scrollbar-track { background: transparent; }
+aside::-webkit-scrollbar-thumb { background: var(--secondary); border-radius: 999px; opacity: 0.6; }
+aside::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 /* ─── Marquee ─── */
 @keyframes marquee {

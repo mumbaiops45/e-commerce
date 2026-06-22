@@ -12,8 +12,9 @@ import { FaRegUser, FaRegHeart } from "react-icons/fa";
 import { HiOutlineShoppingCart } from "react-icons/hi";
 import { BsGrid3X3Gap } from "react-icons/bs";
 import { MdDashboard } from "react-icons/md";
+import { useAuth } from "@/hooks/useAuth";
 import useAuthStore from "@/store/auth.store";
-import { logoutUser } from "@/routes/auth.routes";
+
 import useCategoryStore from "@/store/category.store";
 import { useCategory } from "@/hooks/useCategory";
 import useCartStore from "@/store/cart.store";
@@ -34,7 +35,7 @@ export default function Navbar() {
 
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const logout = useAuthStore((s) => s.logout);
+const { logout } = useAuth();
   const navCategories = useCategoryStore((s) => s.categories);
   const { fetchCategories } = useCategory();
   const cartItems = useCartStore((s) => s.items);
@@ -79,7 +80,7 @@ export default function Navbar() {
   };
 
   async function handleLogout() {
-    try { await logoutUser(); } catch {}
+
     logout();
     setSlideOpen(false);
     router.push("/");
@@ -203,11 +204,11 @@ export default function Navbar() {
 
           {catOpen && navCategories.length > 0 && (
             <div
-              className="absolute top-full left-0 mt-1 bg-white shadow-xl rounded-sm z-50 flex min-w-[420px]"
+              className="absolute top-full left-0 mt-1 bg-white shadow-xl rounded-sm z-50 flex min-w-[220px]"
               onMouseEnter={openMenu}
               onMouseLeave={closeMenu}
             >
-              <div className="w-52 border-r border-[var(--border-light)] py-2">
+              <div className="w-full border-r border-[var(--border-light)] py-2">
                 {navCategories.map((cat, i) => (
                   <div
                     key={cat._id}
@@ -225,33 +226,7 @@ export default function Navbar() {
                   </div>
                 ))}
               </div>
-              <div className="flex-1 p-5 flex flex-col justify-center">
-                {navCategories[hoverCat] && (
-                  <>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--secondary)] mb-3">
-                      {navCategories[hoverCat].name}
-                    </p>
-                    {navCategories[hoverCat].image && (
-                      <img
-                        src={navCategories[hoverCat].image}
-                        alt={navCategories[hoverCat].name}
-                        className="w-full h-24 object-cover rounded-lg mb-3"
-                      />
-                    )}
-                    {navCategories[hoverCat].description && (
-                      <p className="text-xs text-gray-500 mb-3 leading-relaxed line-clamp-2">
-                        {navCategories[hoverCat].description}
-                      </p>
-                    )}
-                    <Link
-                      href={`/category/${navCategories[hoverCat]._id}`}
-                      className="inline-block text-sm text-[var(--secondary)] font-semibold hover:text-[var(--accent)] transition-colors"
-                    >
-                      Browse all {navCategories[hoverCat].name} →
-                    </Link>
-                  </>
-                )}
-              </div>
+            
             </div>
           )}
         </div>

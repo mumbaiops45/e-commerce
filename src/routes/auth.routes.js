@@ -12,11 +12,7 @@ export const loginUser = async (data) => {
   return res.data;
 };
 
-// LOGOUT
-export const logoutUser = async () => {
-  const res = await api.post("/auth/logout");
-  return res.data;
-};
+
 
 // PROFILE (optional later)
 export const getProfile = async () => {

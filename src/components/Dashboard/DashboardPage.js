@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import useAuthStore from "@/store/auth.store";
-import { logoutUser } from "@/routes/auth.routes";
+import { useAuth } from "@/hooks/useAuth";
 import useCategoryStore from "@/store/category.store";
 import useProductStore from "@/store/product.store";
 import useCartStore from "@/store/cart.store";
@@ -43,13 +43,11 @@ function Sidebar({ user, activeTab, onTabChange, onLogout, mobileOpen, onMobileC
   const NavItem = ({ id, icon, label, indent = false }) => (
     <button
       onClick={() => { onTabChange(id); onMobileClose(); }}
-      className={`w-full flex items-center gap-3 rounded-lg text-sm transition-all ${
-        indent ? "pl-10 pr-4 py-2" : "px-4 py-2.5"
-      } ${
-        activeTab === id
+      className={`w-full flex items-center gap-3 rounded-lg text-sm transition-all ${indent ? "pl-10 pr-4 py-2" : "px-4 py-2.5"
+        } ${activeTab === id
           ? "bg-(--accent) text-white font-semibold"
           : "text-gray-600 hover:bg-(--surface-warm) hover:text-(--accent)"
-      }`}
+        }`}
     >
       {icon}
       {label}
@@ -161,7 +159,7 @@ function Sidebar({ user, activeTab, onTabChange, onLogout, mobileOpen, onMobileC
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-64 shrink-0 bg-white border-r border-(--border-light) flex-col min-h-screen sticky top-0 self-start">
+      <aside className="hidden md:flex w-64 shrink-0 bg-white border-r border-(--border-light) flex-col h-screen sticky top-0 overflow-y-auto">
         {content}
       </aside>
 
@@ -210,18 +208,47 @@ function CategoryForm({ initial, onSave, onClose }) {
   const [form, setForm] = useState({
     name: initial?.name || "",
     description: initial?.description || "",
-    image: initial?.image || "",
     isActive: initial?.isActive !== false,
   });
+
+  const [imageFile, setImageFile] = useState(null);          // naya selected file
+  const [existingImage, setExistingImage] = useState(initial?.image || ""); // edit mode purana image
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // local preview URL revoke (memory leak avoid)
+  useEffect(() => {
+    if (!imageFile) return;
+    const url = URL.createObjectURL(imageFile);
+    return () => URL.revokeObjectURL(url);
+  }, [imageFile]);
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setImageFile(file);
+      setExistingImage("");   // naya select kiya to purana hata do
+    }
+    e.target.value = "";
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSaving(true);
     try {
-      await onSave(form);
+      const formData = new FormData();
+      formData.append("name", form.name);
+      formData.append("description", form.description);
+      formData.append("isActive", form.isActive);
+
+      // agar purana image rakha (edit mode, naya nahi chuna)
+      formData.append("existingImage", existingImage);
+
+      // naya file (agar chuna)
+      if (imageFile) formData.append("image", imageFile);
+
+      await onSave(formData);
     } catch (err) {
       setError(
         err?.response?.data?.errors?.[0]?.message ||
@@ -232,6 +259,11 @@ function CategoryForm({ initial, onSave, onClose }) {
       setSaving(false);
     }
   };
+
+  // jo bhi preview dikhana hai
+  const previewSrc = imageFile
+    ? URL.createObjectURL(imageFile)
+    : existingImage || "";
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -246,6 +278,7 @@ function CategoryForm({ initial, onSave, onClose }) {
           className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all"
         />
       </div>
+
       <div>
         <label className="block text-xs font-semibold text-gray-600 mb-1.5">Description</label>
         <textarea
@@ -256,18 +289,37 @@ function CategoryForm({ initial, onSave, onClose }) {
           className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all resize-none"
         />
       </div>
+
+      {/* ─── Image selector ─────────────────────────────── */}
       <div>
-        <label className="block text-xs font-semibold text-gray-600 mb-1.5">Image URL</label>
-        <input
-          type="url" value={form.image}
-          onChange={(e) => setForm({ ...form, image: e.target.value })}
-          placeholder="https://..."
-          className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all"
-        />
-        {form.image && (
-          <img src={form.image} alt="preview" className="mt-2 h-20 rounded-lg object-cover border border-(--border-light)" />
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs font-semibold text-gray-600">Category Image</label>
+          <label className="cursor-pointer text-xs text-(--secondary) font-semibold hover:text-(--accent)">
+            <FaPlus className="inline mr-1" />
+            {previewSrc ? "Change Image" : "Select Image"}
+            <input type="file" accept="image/*" hidden onChange={handleImageChange} />
+          </label>
+        </div>
+
+        {previewSrc ? (
+          <div className="relative w-full h-40 rounded-lg overflow-hidden border border-(--border-light)">
+            <img src={previewSrc} alt="preview" className="w-full h-full object-cover" />
+            <button
+              type="button"
+              onClick={() => { setImageFile(null); setExistingImage(""); }}
+              className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center"
+            >
+              <FaTimes size={11} />
+            </button>
+          </div>
+        ) : (
+          <div className="w-full h-28 bg-(--surface-warm) rounded-lg flex flex-col items-center justify-center text-gray-400 border border-dashed border-(--border-light)">
+            <FaImage className="text-2xl mb-1" />
+            <span className="text-xs">No image selected</span>
+          </div>
         )}
       </div>
+
       {initial && (
         <label className="flex items-center gap-3 cursor-pointer">
           <input
@@ -278,6 +330,7 @@ function CategoryForm({ initial, onSave, onClose }) {
           <span className="text-sm text-gray-600">Active (visible to customers)</span>
         </label>
       )}
+
       <div className="flex gap-3 pt-1">
         <button type="button" onClick={onClose}
           className="flex-1 py-2.5 border border-(--border-light) text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">
@@ -303,33 +356,66 @@ function ProductForm({ initial, categories, onSave, onClose }) {
     stock: initial?.stock ?? "",
     isFeatured: initial?.isFeatured || false,
     isActive: initial?.isActive !== false,
-    images: initial?.images?.length ? initial.images : [{ url: "", alt: "" }],
+    images: [],                                   // sirf NEW File objects
   });
+
+  // existing Cloudinary images (edit mode) — display ke liye alag
+  const [existingImages, setExistingImages] = useState(initial?.images || []);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const setImg = (idx, field, val) => {
-    const imgs = [...form.images];
-    imgs[idx] = { ...imgs[idx], [field]: val };
-    setForm({ ...form, images: imgs });
+  // object URLs ko revoke karo (memory leak avoid)
+  useEffect(() => {
+    const urls = form.images.map((f) => URL.createObjectURL(f));
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [form.images]);
+
+  const handleImageChange = (e) => {
+    const files = Array.from(e.target.files);
+    setForm((prev) => ({ ...prev, images: [...prev.images, ...files] }));
+    e.target.value = "";
+  };
+
+  const removeNewImage = (index) => {
+    setForm((prev) => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index),
+    }));
+  };
+
+  const removeExistingImage = (index) => {
+    setExistingImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSaving(true);
+
     try {
-      await onSave({
-        ...form,
-        price: Number(form.price),
-        stock: Number(form.stock),
-        images: form.images.filter((i) => i.url),
-      });
+      const formData = new FormData();
+      formData.append("title", form.title);
+      formData.append("description", form.description);
+      formData.append("price", Number(form.price));
+      formData.append("brand", form.brand);
+      formData.append("category", form.category);
+      formData.append("stock", Number(form.stock));
+      formData.append("isFeatured", form.isFeatured);
+      formData.append("isActive", form.isActive);
+
+      // jo existing images user ne rakhe — backend ko bhej do
+      formData.append("existingImages", JSON.stringify(existingImages));
+
+      // naye uploaded files
+      form.images.forEach((file) => formData.append("images", file));
+
+      await onSave(formData);
     } catch (err) {
+      console.log("data", err.response?.data);
       setError(
         err?.response?.data?.errors?.[0]?.message ||
-        err?.response?.data?.message ||
-        "Save failed. Please try again."
+          err?.response?.data?.message ||
+          "Save failed. Please try again."
       );
     } finally {
       setSaving(false);
@@ -338,7 +424,11 @@ function ProductForm({ initial, categories, onSave, onClose }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {error && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{error}</div>}
+      {error && (
+        <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">
+          {error}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2">
@@ -393,39 +483,42 @@ function ProductForm({ initial, categories, onSave, onClose }) {
         </div>
       </div>
 
-      {/* Images */}
+      {/* ─── Images ─────────────────────────────────────────── */}
       <div>
-        <div className="flex items-center justify-between mb-2">
-          <label className="text-xs font-semibold text-gray-600">Images</label>
-          <button type="button"
-            onClick={() => setForm({ ...form, images: [...form.images, { url: "", alt: "" }] })}
-            className="text-xs text-(--secondary) font-semibold hover:text-(--accent) flex items-center gap-1">
-            <FaPlus className="text-[10px]" /> Add Image
-          </button>
+        <div className="flex items-center justify-between mb-3">
+          <label className="text-xs font-semibold text-gray-600">Product Images</label>
+          <label className="cursor-pointer text-xs text-(--secondary) font-semibold hover:text-(--accent)">
+            <FaPlus className="inline mr-1" />
+            Add Images
+            <input type="file" accept="image/*" multiple hidden onChange={handleImageChange} />
+          </label>
         </div>
-        <div className="space-y-2">
-          {form.images.map((img, idx) => (
-            <div key={idx} className="flex gap-2 items-center">
-              <input type="url" value={img.url}
-                onChange={(e) => setImg(idx, "url", e.target.value)}
-                placeholder="Image URL (https://...)"
-                className="flex-1 border border-(--border-light) rounded-lg px-3 py-2 text-sm outline-none focus:border-(--secondary) transition-all"
-              />
-              <input type="text" value={img.alt}
-                onChange={(e) => setImg(idx, "alt", e.target.value)}
-                placeholder="Alt text"
-                className="w-28 border border-(--border-light) rounded-lg px-3 py-2 text-sm outline-none focus:border-(--secondary) transition-all"
-              />
-              {form.images.length > 1 && (
-                <button type="button"
-                  onClick={() => setForm({ ...form, images: form.images.filter((_, i) => i !== idx) })}
-                  className="text-red-400 hover:text-red-600 shrink-0">
-                  <FaTimes className="text-xs" />
+
+        {(existingImages.length > 0 || form.images.length > 0) && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {/* existing images (edit mode) */}
+            {existingImages.map((img, index) => (
+              <div key={`old-${index}`} className="relative border rounded-lg overflow-hidden">
+                <img src={img.url} alt={img.alt || "product"} className="w-full h-28 object-cover" />
+                <button type="button" onClick={() => removeExistingImage(index)}
+                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center">
+                  <FaTimes size={10} />
                 </button>
-              )}
-            </div>
-          ))}
-        </div>
+              </div>
+            ))}
+
+            {/* newly added files */}
+            {form.images.map((file, index) => (
+              <div key={`new-${index}`} className="relative border rounded-lg overflow-hidden">
+                <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-28 object-cover" />
+                <button type="button" onClick={() => removeNewImage(index)}
+                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center">
+                  <FaTimes size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-5">
@@ -600,9 +693,8 @@ function ManageCategories() {
                       </span>
                     </td>
                     <td className="py-3.5 px-3">
-                      <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                        cat.isActive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
-                      }`}>
+                      <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${cat.isActive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
+                        }`}>
                         {cat.isActive ? "Active" : "Inactive"}
                       </span>
                     </td>
@@ -641,7 +733,7 @@ function ManageCategories() {
           {!sel.image && <div className="w-full h-24 bg-(--surface-warm) rounded-xl mb-4 flex items-center justify-center text-gray-400"><FaImage className="text-4xl" /></div>}
           <div className="space-y-3 mb-5">
             {[["Name", sel.name], ["Description", sel.description || "—"], ["Status", sel.isActive ? "Active" : "Inactive"],
-              ["Created", new Date(sel.createdAt).toLocaleDateString()]].map(([l, v]) => (
+            ["Created", new Date(sel.createdAt).toLocaleDateString()]].map(([l, v]) => (
               <div key={l} className="flex gap-3">
                 <span className="text-xs font-semibold text-gray-400 w-24 shrink-0 pt-0.5">{l}</span>
                 <span className="text-sm text-(--accent) font-medium flex-1">{v}</span>
@@ -748,9 +840,8 @@ function ManageProducts() {
                         <span className={`text-sm font-semibold ${p.stock === 0 ? "text-red-500" : "text-gray-700"}`}>{p.stock}</span>
                       </td>
                       <td className="py-3.5 px-3">
-                        <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                          p.isActive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
-                        }`}>
+                        <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${p.isActive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
+                          }`}>
                           {p.isActive ? "Active" : "Inactive"}
                         </span>
                       </td>
@@ -796,11 +887,11 @@ function ManageProducts() {
                 }
                 <div className="space-y-3 mb-5">
                   {[["Title", sel.title], ["Brand", sel.brand], ["Category", sel.category?.name || "—"],
-                    ["Price", `₹${sel.price}`], ["Stock", sel.stock], ["Featured", sel.isFeatured ? "Yes" : "No"],
-                    ["Status", sel.isActive ? "Active" : "Inactive"],
-                    ["Rating", sel.averageRating?.toFixed(1) || "0"],
-                    ["Reviews", sel.numReviews || "0"],
-                    ["Description", sel.description]].map(([l, v]) => (
+                  ["Price", `₹${sel.price}`], ["Stock", sel.stock], ["Featured", sel.isFeatured ? "Yes" : "No"],
+                  ["Status", sel.isActive ? "Active" : "Inactive"],
+                  ["Rating", sel.averageRating?.toFixed(1) || "0"],
+                  ["Reviews", sel.numReviews || "0"],
+                  ["Description", sel.description]].map(([l, v]) => (
                     <div key={l} className="flex gap-3">
                       <span className="text-xs font-semibold text-gray-400 w-24 shrink-0 pt-0.5">{l}</span>
                       <span className="text-sm text-(--accent) font-medium flex-1 break-words">{v}</span>
@@ -843,7 +934,7 @@ function CreateCategorySection() {
               setSuccess("Category created successfully!");
               setTimeout(() => setSuccess(""), 3000);
             }}
-            onClose={() => {}}
+            onClose={() => { }}
           />
         </div>
       </div>
@@ -877,7 +968,7 @@ function CreateProductSection() {
               setSuccess("Product created successfully!");
               setTimeout(() => setSuccess(""), 3000);
             }}
-            onClose={() => {}}
+            onClose={() => { }}
           />
         </div>
       </div>
@@ -936,9 +1027,8 @@ function OrderTimeline({ order }) {
           return (
             <div key={step} className="flex items-start flex-1 last:flex-none">
               <div className="flex flex-col items-center">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                  done ? "bg-green-500 text-white" : "bg-gray-200 text-gray-400"
-                } ${current ? "ring-2 ring-green-300 ring-offset-1" : ""}`}>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${done ? "bg-green-500 text-white" : "bg-gray-200 text-gray-400"
+                  } ${current ? "ring-2 ring-green-300 ring-offset-1" : ""}`}>
                   {done ? "✓" : idx + 1}
                 </div>
                 <p className={`text-[9px] mt-1 font-semibold capitalize text-center ${done ? "text-green-600" : "text-gray-400"}`}>
@@ -1057,8 +1147,8 @@ function MyOrdersTab() {
   const filtered = filter === "unpaid"
     ? orders.filter((o) => o.paymentStatus === "pending")
     : filter === "paid"
-    ? orders.filter((o) => o.paymentStatus === "paid")
-    : orders;
+      ? orders.filter((o) => o.paymentStatus === "paid")
+      : orders;
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -1079,15 +1169,13 @@ function MyOrdersTab() {
             ].map((f) => (
               <button key={f.key}
                 onClick={() => { setFilter(f.key); setPage(1); }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-                  filter === f.key
-                    ? "bg-(--accent) text-white"
-                    : "bg-white border border-(--border-light) text-gray-600 hover:border-(--secondary)"
-                }`}>
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${filter === f.key
+                  ? "bg-(--accent) text-white"
+                  : "bg-white border border-(--border-light) text-gray-600 hover:border-(--secondary)"
+                  }`}>
                 {f.label}
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  filter === f.key ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"
-                }`}>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${filter === f.key ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"
+                  }`}>
                   {f.count}
                 </span>
               </button>
@@ -1441,11 +1529,10 @@ function SuperadminStatusControl({ order, onUpdated, showToast }) {
             key={s}
             onClick={() => handleChange(s)}
             disabled={saving || s === current}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all disabled:opacity-50 ${
-              s === current
-                ? `${SC[s]} border-transparent cursor-default`
-                : "bg-white border-gray-200 text-gray-600 hover:border-(--secondary) hover:text-(--secondary)"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all disabled:opacity-50 ${s === current
+              ? `${SC[s]} border-transparent cursor-default`
+              : "bg-white border-gray-200 text-gray-600 hover:border-(--secondary) hover:text-(--secondary)"
+              }`}
           >
             {s === current ? `✓ ${s}` : s}
           </button>
@@ -2400,9 +2487,8 @@ function ManageCoupons() {
                       </span>
                     </td>
                     <td className="py-3.5 px-3">
-                      <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                        c.isActive && !isExpired(c.expiresAt) ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
-                      }`}>
+                      <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${c.isActive && !isExpired(c.expiresAt) ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
+                        }`}>
                         {!c.isActive ? "Inactive" : isExpired(c.expiresAt) ? "Expired" : "Active"}
                       </span>
                     </td>
@@ -2461,7 +2547,7 @@ function CouponsTab() {
   );
 
   const handleCopy = (code) => {
-    navigator.clipboard.writeText(code).catch(() => {});
+    navigator.clipboard.writeText(code).catch(() => { });
     setCopiedCode(code);
     setTimeout(() => setCopiedCode(""), 2000);
   };
@@ -2531,11 +2617,10 @@ function CouponsTab() {
                       <span className="flex-1 font-mono text-sm font-bold text-(--accent) tracking-widest">{c.code}</span>
                       <button
                         onClick={() => handleCopy(c.code)}
-                        className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg transition-all ${
-                          isCopied
-                            ? "bg-green-100 text-green-700"
-                            : "bg-(--accent) text-white hover:bg-(--secondary)"
-                        }`}
+                        className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg transition-all ${isCopied
+                          ? "bg-green-100 text-green-700"
+                          : "bg-(--accent) text-white hover:bg-(--secondary)"
+                          }`}
                       >
                         {isCopied ? <FaCheck className="text-[10px]" /> : <FaClipboard className="text-[10px]" />}
                         {isCopied ? "Copied!" : "Copy"}
@@ -2765,9 +2850,8 @@ function ManageBanners() {
         <div className="flex gap-2 mb-5">
           {["hero", "middle"].map((t) => (
             <button key={t} onClick={() => setActiveType(t)}
-              className={`px-4 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${
-                activeType === t ? "bg-(--accent) text-white" : "bg-white border border-(--border-light) text-gray-600 hover:border-(--secondary)"
-              }`}>
+              className={`px-4 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${activeType === t ? "bg-(--accent) text-white" : "bg-white border border-(--border-light) text-gray-600 hover:border-(--secondary)"
+                }`}>
               {t} Banners ({t === "hero" ? heroBanners.length : middleBanners.length})
             </button>
           ))}
@@ -2978,7 +3062,8 @@ function PlaceholderTab({ title, icon }) {
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const logout = useAuthStore((s) => s.logout);
+
+  const { logout } = useAuth();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("profile");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -3002,29 +3087,29 @@ export default function DashboardPage() {
   }
 
   const handleLogout = async () => {
-    try { await logoutUser(); } catch {}
+
     logout();
     router.push("/");
   };
 
   const renderContent = () => {
     switch (activeTab) {
-      case "profile":            return <ProfileTab user={user} />;
-      case "manage-products":    return <ManageProducts />;
-      case "create-product":     return <CreateProductSection />;
-      case "manage-categories":  return <ManageCategories />;
-      case "create-category":    return <CreateCategorySection />;
-      case "orders":             return isAdminRole(user?.role) ? <AdminOrdersTab /> : <MyOrdersTab />;
-      case "user-management":    return <UserManagementTab />;
-      case "admin-management":   return <AdminManagementTab />;
-      case "manage-coupons":     return <ManageCoupons />;
-      case "manage-banners":     return <ManageBanners />;
-      case "manage-shipping":    return <ManageShipping />;
-      case "coupons":            return <CouponsTab />;
-      case "cart":               return <CartTab />;
-      case "wishlist":           return <WishlistTab />;
-      case "settings":           return <PlaceholderTab title="Settings" icon={<FaCog />} />;
-      default:                   return <ProfileTab user={user} />;
+      case "profile": return <ProfileTab user={user} />;
+      case "manage-products": return <ManageProducts />;
+      case "create-product": return <CreateProductSection />;
+      case "manage-categories": return <ManageCategories />;
+      case "create-category": return <CreateCategorySection />;
+      case "orders": return isAdminRole(user?.role) ? <AdminOrdersTab /> : <MyOrdersTab />;
+      case "user-management": return <UserManagementTab />;
+      case "admin-management": return <AdminManagementTab />;
+      case "manage-coupons": return <ManageCoupons />;
+      case "manage-banners": return <ManageBanners />;
+      case "manage-shipping": return <ManageShipping />;
+      case "coupons": return <CouponsTab />;
+      case "cart": return <CartTab />;
+      case "wishlist": return <WishlistTab />;
+      case "settings": return <PlaceholderTab title="Settings" icon={<FaCog />} />;
+      default: return <ProfileTab user={user} />;
     }
   };
 

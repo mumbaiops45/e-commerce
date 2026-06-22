@@ -1,5 +1,5 @@
 import useAuthStore from "@/store/auth.store";
-import { loginUser, registerUser, logoutUser } from "@/routes/auth.routes";
+import { loginUser, registerUser} from "@/routes/auth.routes";
 
 export const useAuth = () => {
   const setUser = useAuthStore((s) => s.setUser);
@@ -31,9 +31,9 @@ export const useAuth = () => {
   };
 
   const logout = async () => {
-    try { await logoutUser(); } catch {}
+
     localStorage.removeItem("token");
-    storeLogout();
+   storeLogout();
   };
 
   return { login, register, logout };
