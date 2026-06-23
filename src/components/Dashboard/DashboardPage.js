@@ -2915,12 +2915,33 @@ function ManageBanners() {
 }
 
 // ─── Manage Shipping (superadmin) ─────────────────────────────
+// ─── Indian states list (place near top of file, outside component) ──────────
+const INDIAN_STATES = [
+  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
+  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
+  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+  "Andaman and Nicobar Islands", "Chandigarh",
+  "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Jammu and Kashmir",
+  "Ladakh", "Lakshadweep", "Puducherry",
+];
+
+// ─── Manage Shipping (superadmin) ─────────────────────────────
 function ManageShipping() {
   const config = useShippingStore((s) => s.config);
   const loading = useShippingStore((s) => s.loading);
   const { fetchShipping, createShipping, updateShipping } = useShipping();
-  const [mode, setMode] = useState("view");
-  const [form, setForm] = useState({ freeShippingThreshold: "", standardRate: "", expressRate: "" });
+
+  const [mode, setMode] = useState("view"); // view | edit
+  const [form, setForm] = useState({
+    mode: "flat",
+    flatCharge: "",
+    freeShippingAbove: "",
+    slabs: [],   // [{ minAmount, maxAmount, charge }]
+    states: [],  // [{ state, charge }]
+    isActive: true,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
@@ -2929,26 +2950,80 @@ function ManageShipping() {
 
   useEffect(() => { fetchShipping(); }, []);
 
-  useEffect(() => {
-    if (config) {
-      setForm({
-        freeShippingThreshold: config.freeShippingThreshold ?? "",
-        standardRate: config.standardRate ?? "",
-        expressRate: config.expressRate ?? "",
-      });
-    }
-  }, [config]);
+  // hydrate form from config
+  const syncFormFromConfig = () => {
+    setForm({
+      mode: config?.mode || "flat",
+      flatCharge: config?.flatCharge ?? "",
+      freeShippingAbove: config?.freeShippingAbove ?? "",
+      slabs: (config?.slabs || []).map((s) => ({
+        minAmount: s.minAmount, maxAmount: s.maxAmount, charge: s.charge,
+      })),
+      states: (config?.states || []).map((s) => ({
+        state: s.state, charge: s.charge,
+      })),
+      isActive: config?.isActive !== false,
+    });
+  };
+
+  useEffect(() => { if (config) syncFormFromConfig(); }, [config]);
+
+  // ── slab helpers ──
+  const addSlab = () =>
+    setForm((f) => ({ ...f, slabs: [...f.slabs, { minAmount: "", maxAmount: "", charge: "" }] }));
+  const updateSlab = (i, key, val) =>
+    setForm((f) => ({ ...f, slabs: f.slabs.map((s, idx) => idx === i ? { ...s, [key]: val } : s) }));
+  const removeSlab = (i) =>
+    setForm((f) => ({ ...f, slabs: f.slabs.filter((_, idx) => idx !== i) }));
+
+  // ── state helpers ──
+  const addState = () =>
+    setForm((f) => ({ ...f, states: [...f.states, { state: "", charge: "" }] }));
+  const updateStateRow = (i, key, val) =>
+    setForm((f) => ({ ...f, states: f.states.map((s, idx) => idx === i ? { ...s, [key]: val } : s) }));
+  const removeState = (i) =>
+    setForm((f) => ({ ...f, states: f.states.filter((_, idx) => idx !== i) }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+
+    // basic validation per mode
+    if (form.mode === "flat" && form.flatCharge === "") {
+      setError("Flat charge is required for flat mode."); return;
+    }
+    if (form.mode === "state") {
+      if (form.states.length === 0) { setError("Add at least one state with a charge."); return; }
+      if (form.states.some((s) => !s.state || s.charge === "")) {
+        setError("Each state row needs a state and a charge."); return;
+      }
+    }
+    if (form.mode === "slab") {
+      if (form.slabs.length === 0) { setError("Add at least one slab."); return; }
+      if (form.slabs.some((s) => s.minAmount === "" || s.maxAmount === "" || s.charge === "")) {
+        setError("Each slab needs min, max and charge."); return;
+      }
+    }
+
     setSaving(true);
     try {
       const payload = {
-        freeShippingThreshold: Number(form.freeShippingThreshold),
-        standardRate: Number(form.standardRate),
-        ...(form.expressRate !== "" && { expressRate: Number(form.expressRate) }),
+        mode: form.mode,
+        freeShippingAbove: Number(form.freeShippingAbove) || 0,
+        flatCharge: form.mode === "flat" ? Number(form.flatCharge) || 0 : (Number(form.flatCharge) || 0),
+        slabs: form.mode === "slab"
+          ? form.slabs.map((s) => ({
+              minAmount: Number(s.minAmount),
+              maxAmount: Number(s.maxAmount),
+              charge: Number(s.charge),
+            }))
+          : [],
+        states: form.mode === "state"
+          ? form.states.map((s) => ({ state: s.state, charge: Number(s.charge) }))
+          : [],
+        isActive: form.isActive,
       };
+
       if (config) { await updateShipping(config._id, payload); showToast("Shipping config updated"); }
       else { await createShipping(payload); showToast("Shipping config created"); }
       setMode("view");
@@ -2958,11 +3033,12 @@ function ManageShipping() {
   };
 
   const inp = "w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all";
+  const modeLabel = { flat: "Flat Rate", state: "State-wise", slab: "Amount Slabs" };
 
   return (
     <div>
       <SectionHeader title="Shipping Configuration" />
-      <div className="px-6 py-6 max-w-xl">
+      <div className="px-6 py-6 max-w-2xl">
         {loading ? (
           <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />)}</div>
         ) : (
@@ -2971,58 +3047,184 @@ function ManageShipping() {
               <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
                 <FaTruck className="text-white text-lg" />
               </div>
-              <div>
+              <div className="flex-1">
                 <p className="text-white font-bold">Shipping Settings</p>
                 <p className="text-white/70 text-xs">{config ? "Config active" : "No config yet — create one below"}</p>
               </div>
+              {config && (
+                <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold ${config.isActive ? "bg-green-400/30 text-white" : "bg-red-400/30 text-white"}`}>
+                  {config.isActive ? "Active" : "Inactive"}
+                </span>
+              )}
             </div>
 
+            {/* ─── VIEW MODE ─── */}
             {mode === "view" && config ? (
               <div className="p-6">
                 <div className="space-y-0 mb-5">
-                  {[
-                    ["Free Shipping Above", `₹${config.freeShippingThreshold?.toLocaleString() ?? "—"}`],
-                    ["Standard Shipping Rate", `₹${config.standardRate?.toLocaleString() ?? "—"}`],
-                    ["Express Shipping Rate", config.expressRate != null ? `₹${config.expressRate?.toLocaleString()}` : "Not set"],
-                  ].map(([l, v]) => (
-                    <div key={l} className="flex items-center justify-between py-3 border-b border-(--border-light) last:border-0">
-                      <span className="text-sm text-gray-500 font-medium">{l}</span>
-                      <span className="text-sm font-bold text-(--accent)">{v}</span>
+                  <div className="flex items-center justify-between py-3 border-b border-(--border-light)">
+                    <span className="text-sm text-gray-500 font-medium">Shipping Mode</span>
+                    <span className="text-sm font-bold text-(--accent)">{modeLabel[config.mode] || config.mode}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-3 border-b border-(--border-light)">
+                    <span className="text-sm text-gray-500 font-medium">Free Shipping Above</span>
+                    <span className="text-sm font-bold text-(--accent)">
+                      {config.freeShippingAbove > 0 ? `₹${config.freeShippingAbove.toLocaleString()}` : "Not set"}
+                    </span>
+                  </div>
+
+                  {config.mode === "flat" && (
+                    <div className="flex items-center justify-between py-3 border-b border-(--border-light) last:border-0">
+                      <span className="text-sm text-gray-500 font-medium">Flat Charge</span>
+                      <span className="text-sm font-bold text-(--accent)">₹{(config.flatCharge || 0).toLocaleString()}</span>
                     </div>
-                  ))}
+                  )}
+
+                  {config.mode === "state" && (
+                    <div className="py-3">
+                      <p className="text-sm text-gray-500 font-medium mb-2">State-wise Charges</p>
+                      <div className="space-y-1.5">
+                        {(config.states || []).map((s, i) => (
+                          <div key={i} className="flex items-center justify-between bg-(--surface-warm) rounded-lg px-3 py-2">
+                            <span className="text-sm text-(--accent) font-medium">{s.state}</span>
+                            <span className="text-sm font-bold text-(--accent)">₹{(s.charge || 0).toLocaleString()}</span>
+                          </div>
+                        ))}
+                        {(config.states || []).length === 0 && <p className="text-xs text-gray-400">No states configured.</p>}
+                      </div>
+                    </div>
+                  )}
+
+                  {config.mode === "slab" && (
+                    <div className="py-3">
+                      <p className="text-sm text-gray-500 font-medium mb-2">Amount Slabs</p>
+                      <div className="space-y-1.5">
+                        {(config.slabs || []).map((s, i) => (
+                          <div key={i} className="flex items-center justify-between bg-(--surface-warm) rounded-lg px-3 py-2">
+                            <span className="text-sm text-(--accent) font-medium">₹{s.minAmount?.toLocaleString()} – ₹{s.maxAmount?.toLocaleString()}</span>
+                            <span className="text-sm font-bold text-(--accent)">₹{(s.charge || 0).toLocaleString()}</span>
+                          </div>
+                        ))}
+                        {(config.slabs || []).length === 0 && <p className="text-xs text-gray-400">No slabs configured.</p>}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 <button
-                  onClick={() => setMode("edit")}
+                  onClick={() => { syncFormFromConfig(); setError(""); setMode("edit"); }}
                   className="w-full py-2.5 bg-(--accent) text-white text-sm font-semibold rounded-xl hover:bg-(--secondary) transition-colors flex items-center justify-center gap-2"
                 >
                   <FaEdit className="text-xs" /> Edit Configuration
                 </button>
               </div>
             ) : (
+              /* ─── EDIT / CREATE MODE ─── */
               <form onSubmit={handleSubmit} className="p-6 space-y-4">
                 {error && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">{error}</div>}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">Free Shipping Above (₹) *</label>
-                  <input type="number" required min="0" value={form.freeShippingThreshold}
-                    onChange={(e) => setForm({ ...form, freeShippingThreshold: e.target.value })}
-                    placeholder="e.g. 2500" className={inp} />
-                  <p className="text-[11px] text-gray-400 mt-1">Orders above this amount get free shipping</p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">Shipping Mode *</label>
+                    <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })} className={`${inp} bg-white`}>
+                      <option value="flat">Flat Rate</option>
+                      <option value="state">State-wise</option>
+                      <option value="slab">Amount Slabs</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">Free Shipping Above (₹)</label>
+                    <input type="number" min="0" value={form.freeShippingAbove}
+                      onChange={(e) => setForm({ ...form, freeShippingAbove: e.target.value })}
+                      placeholder="0 = no free shipping" className={inp} />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">Standard Shipping Rate (₹) *</label>
-                  <input type="number" required min="0" value={form.standardRate}
-                    onChange={(e) => setForm({ ...form, standardRate: e.target.value })}
-                    placeholder="e.g. 99" className={inp} />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">Express Shipping Rate (₹)</label>
-                  <input type="number" min="0" value={form.expressRate}
-                    onChange={(e) => setForm({ ...form, expressRate: e.target.value })}
-                    placeholder="Leave blank if not offered" className={inp} />
-                </div>
+
+                {/* FLAT */}
+                {form.mode === "flat" && (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">Flat Charge (₹) *</label>
+                    <input type="number" min="0" value={form.flatCharge}
+                      onChange={(e) => setForm({ ...form, flatCharge: e.target.value })}
+                      placeholder="e.g. 100" className={inp} />
+                  </div>
+                )}
+
+                {/* STATE */}
+                {form.mode === "state" && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-semibold text-gray-600">State-wise Charges *</label>
+                      <button type="button" onClick={addState}
+                        className="text-xs text-(--secondary) font-semibold hover:text-(--accent) flex items-center gap-1">
+                        <FaPlus className="text-[10px]" /> Add State
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {form.states.map((s, i) => (
+                        <div key={i} className="flex gap-2">
+                          <select value={s.state} onChange={(e) => updateStateRow(i, "state", e.target.value)}
+                            className={`${inp} bg-white flex-1`}>
+                            <option value="">Select state</option>
+                            {INDIAN_STATES.map((st) => <option key={st} value={st}>{st}</option>)}
+                          </select>
+                          <input type="number" min="0" value={s.charge}
+                            onChange={(e) => updateStateRow(i, "charge", e.target.value)}
+                            placeholder="₹ charge" className={`${inp} w-32`} />
+                          <button type="button" onClick={() => removeState(i)}
+                            className="w-10 shrink-0 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center">
+                            <FaTrash className="text-xs" />
+                          </button>
+                        </div>
+                      ))}
+                      {form.states.length === 0 && <p className="text-xs text-gray-400">No states added yet.</p>}
+                    </div>
+                  </div>
+                )}
+
+                {/* SLAB */}
+                {form.mode === "slab" && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-semibold text-gray-600">Amount Slabs *</label>
+                      <button type="button" onClick={addSlab}
+                        className="text-xs text-(--secondary) font-semibold hover:text-(--accent) flex items-center gap-1">
+                        <FaPlus className="text-[10px]" /> Add Slab
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {form.slabs.map((s, i) => (
+                        <div key={i} className="flex gap-2">
+                          <input type="number" min="0" value={s.minAmount}
+                            onChange={(e) => updateSlab(i, "minAmount", e.target.value)}
+                            placeholder="Min ₹" className={`${inp} flex-1`} />
+                          <input type="number" min="0" value={s.maxAmount}
+                            onChange={(e) => updateSlab(i, "maxAmount", e.target.value)}
+                            placeholder="Max ₹" className={`${inp} flex-1`} />
+                          <input type="number" min="0" value={s.charge}
+                            onChange={(e) => updateSlab(i, "charge", e.target.value)}
+                            placeholder="Charge ₹" className={`${inp} flex-1`} />
+                          <button type="button" onClick={() => removeSlab(i)}
+                            className="w-10 shrink-0 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center">
+                            <FaTrash className="text-xs" />
+                          </button>
+                        </div>
+                      ))}
+                      {form.slabs.length === 0 && <p className="text-xs text-gray-400">No slabs added yet.</p>}
+                    </div>
+                  </div>
+                )}
+
+                <label className="flex items-center gap-3 cursor-pointer pt-1">
+                  <input type="checkbox" checked={form.isActive}
+                    onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+                    className="accent-(--secondary) w-4 h-4" />
+                  <span className="text-sm text-gray-600">Active (used at checkout)</span>
+                </label>
+
                 <div className="flex gap-3 pt-1">
                   {config && (
-                    <button type="button" onClick={() => setMode("view")}
+                    <button type="button" onClick={() => { syncFormFromConfig(); setError(""); setMode("view"); }}
                       className="flex-1 py-2.5 border border-(--border-light) text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-colors">
                       Cancel
                     </button>

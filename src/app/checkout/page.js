@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import useAuthStore from "@/store/auth.store";
 import useCartStore from "@/store/cart.store";
+import useShippingStore from "@/store/shipping.store";
 import { useCart } from "@/hooks/useCart";
+import { useShipping } from "@/hooks/useShipping";
 import { placeOrder } from "@/routes/order.routes";
 import { getAllCoupons } from "@/routes/coupon.routes";
 import { createPaymentOrder, verifyPayment } from "@/routes/payment.routes";
@@ -13,6 +15,17 @@ import {
   FaArrowLeft, FaShoppingBag, FaMapMarkerAlt,
   FaCheckCircle, FaImage, FaTruck, FaTag, FaTimes,
 } from "react-icons/fa";
+
+const INDIAN_STATES = [
+  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
+  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
+  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+  "Andaman and Nicobar Islands", "Chandigarh",
+  "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Jammu and Kashmir",
+  "Ladakh", "Lakshadweep", "Puducherry",
+];
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -27,6 +40,10 @@ export default function CheckoutPage() {
 
   const items = useCartStore((s) => s.items);
   const { emptyCart } = useCart();
+
+  // ─── Shipping config (from API) ───────────────────────────────
+  const shippingConfig = useShippingStore((s) => s.config);
+  const { fetchShipping } = useShipping();
 
   const [step, setStep] = useState("address"); // address | success
   const [createdOrder, setCreatedOrder] = useState(null);
@@ -54,6 +71,11 @@ export default function CheckoutPage() {
     }
   }, [isAuthenticated, user]);
 
+  // fetch shipping config once
+  useEffect(() => {
+    fetchShipping().catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (step !== "success" && isAuthenticated && items.length === 0) {
       router.replace(`${dashboardPath}?tab=cart`);
@@ -61,8 +83,52 @@ export default function CheckoutPage() {
   }, [items, step, isAuthenticated]);
 
   const subtotal = items.reduce((sum, i) => sum + (i.product?.price || 0) * i.quantity, 0);
-  const shipping = subtotal >= 2500 ? 0 : 100;
-  const total = subtotal + shipping - discountAmount;
+
+  // ─── Shipping estimate (mirrors backend logic) ────────────────
+  // NOTE: this is ONLY an estimate for the UI. The real charge + total
+  // are computed in the backend and read back from the saved order.
+  const shippingInfo = useMemo(() => {
+    if (!shippingConfig) {
+      return { charge: 0, available: true, free: false, pending: false, note: "" };
+    }
+    // free shipping threshold (matches backend: subtotal >= freeShippingAbove)
+    if (subtotal >= shippingConfig.freeShippingAbove) {
+      return { charge: 0, available: true, free: true, pending: false, note: "" };
+    }
+    const mode = shippingConfig.mode;
+    if (mode === "flat") {
+      return { charge: shippingConfig.flatCharge || 0, available: true, free: false, pending: false, note: "" };
+    }
+    if (mode === "state") {
+      if (!addr.state) {
+        return { charge: 0, available: true, free: false, pending: true, note: "Select your state to see shipping" };
+      }
+      const s = shippingConfig.states?.find(
+        (x) => x.state?.toLowerCase() === addr.state.toLowerCase()
+      );
+      if (!s) {
+        return { charge: 0, available: false, free: false, pending: false, note: `Shipping not available for ${addr.state}` };
+      }
+      return { charge: s.charge || 0, available: true, free: false, pending: false, note: "" };
+    }
+    if (mode === "slab") {
+      const slab = shippingConfig.slabs?.find(
+        (sl) => sl.minAmount <= subtotal && sl.maxAmount >= subtotal
+      );
+      if (!slab) {
+        return { charge: 0, available: false, free: false, pending: false, note: "No shipping option for this order amount" };
+      }
+      return { charge: slab.charge || 0, available: true, free: false, pending: false, note: "" };
+    }
+    return { charge: 0, available: true, free: false, pending: false, note: "" };
+  }, [shippingConfig, subtotal, addr.state]);
+
+  const estTotal = Math.max(0, subtotal - discountAmount + shippingInfo.charge);
+
+  // remaining for free shipping (only when a threshold is set)
+  const freeAbove = shippingConfig?.freeShippingAbove || 0;
+  const remainingForFree =
+    freeAbove > 0 && subtotal < freeAbove ? freeAbove - subtotal : 0;
 
   // ─── Apply coupon ─────────────────────────────────────────────
   const handleApplyCoupon = async () => {
@@ -122,6 +188,12 @@ export default function CheckoutPage() {
   const handleAddressSubmit = async (e) => {
     e.preventDefault();
     setError("");
+
+    if (!shippingInfo.available) {
+      setError(shippingInfo.note || "Shipping not available for this address.");
+      return;
+    }
+
     setLoading(true);
     try {
       const orderItems = items.map((item) => ({
@@ -129,10 +201,10 @@ export default function CheckoutPage() {
         quantity: item.quantity,
       }));
 
-      // Step 1: Create the order (pending payment), pass coupon code if applied
+      // Step 1: Create the order (backend computes real subtotal/discount/shipping/total)
       const result = await placeOrder(orderItems, addr, appliedCoupon?.code);
       const order = result.order;
-      setCreatedOrder(order);
+      setCreatedOrder(order); // <- DB values live here
 
       // Step 2: Load Razorpay and open payment modal
       const loaded = await loadRazorpayScript();
@@ -142,6 +214,7 @@ export default function CheckoutPage() {
         return;
       }
 
+      // amount comes from backend (DB total), not UI
       const { razorpayOrder } = await createPaymentOrder(order._id);
 
       const options = {
@@ -195,8 +268,9 @@ export default function CheckoutPage() {
 
   if (!isAuthenticated) return null;
 
-  // ─── Success ──────────────────────────────────────────────────────────────
+  // ─── Success (all amounts from DB / saved order) ──────────────────────────
   if (step === "success") {
+    const o = createdOrder || {};
     return (
       <div className="min-h-screen bg-(--surface-warm) flex items-center justify-center px-4 py-16">
         <div className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full text-center">
@@ -204,14 +278,32 @@ export default function CheckoutPage() {
             <FaCheckCircle className="text-green-500 text-4xl" />
           </div>
           <h2 className="text-2xl font-bold text-(--accent) mb-2">Order Placed & Paid!</h2>
-          <p className="text-gray-500 text-sm mb-1">
-            Order <span className="font-semibold text-(--accent)">#{createdOrder?._id?.slice(-8).toUpperCase()}</span> confirmed.
+          <p className="text-gray-500 text-sm mb-3">
+            Order <span className="font-semibold text-(--accent)">#{o?._id?.slice(-8).toUpperCase()}</span> confirmed.
           </p>
-          {discountAmount > 0 && (
-            <p className="text-green-600 text-xs font-semibold mb-1">
-              You saved ₹{discountAmount.toLocaleString()} with coupon <span className="uppercase">{appliedCoupon?.code}</span>!
-            </p>
-          )}
+
+          {/* DB-driven breakdown */}
+          <div className="text-left bg-gray-50 rounded-xl p-4 mb-4 space-y-2 text-sm">
+            <div className="flex justify-between text-gray-600">
+              <span>Subtotal</span><span>₹{(o.subtotal || 0).toLocaleString()}</span>
+            </div>
+            {(o.discountAmount || 0) > 0 && (
+              <div className="flex justify-between text-green-600 font-semibold">
+                <span>Coupon{o.couponCode ? ` (${o.couponCode})` : ""}</span>
+                <span>−₹{(o.discountAmount || 0).toLocaleString()}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-gray-600">
+              <span>Shipping</span>
+              <span className={(o.shippingAmount || 0) === 0 ? "text-green-600 font-semibold" : ""}>
+                {(o.shippingAmount || 0) === 0 ? "FREE" : `₹${(o.shippingAmount || 0).toLocaleString()}`}
+              </span>
+            </div>
+            <div className="flex justify-between font-bold text-(--accent) text-base border-t border-(--border-light) pt-2">
+              <span>Total Paid</span><span>₹{(o.totalAmount || 0).toLocaleString()}</span>
+            </div>
+          </div>
+
           <p className="text-gray-400 text-xs mb-8">
             View it anytime in your account under <strong>My Orders</strong>.
           </p>
@@ -233,114 +325,6 @@ export default function CheckoutPage() {
       </div>
     );
   }
-
-  // ─── Order summary sidebar ────────────────────────────────────────────────
-  const OrderSummary = () => (
-    <div className="bg-white rounded-2xl border border-(--border-light) p-5 sticky top-4">
-      <h3 className="font-bold text-(--accent) mb-4 flex items-center gap-2 text-sm">
-        <FaShoppingBag /> Order Summary
-      </h3>
-      <div className="space-y-3 max-h-56 overflow-y-auto mb-4 pr-1">
-        {items.map((item) => {
-          const product = item.product;
-          if (!product) return null;
-          const img = product.images?.[0];
-          return (
-            <div key={product._id || product} className="flex gap-3 items-center">
-              <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 shrink-0">
-                {img
-                  ? <img src={img.url} alt={img.alt} className="w-full h-full object-cover" />
-                  : <div className="w-full h-full flex items-center justify-center text-gray-400"><FaImage className="text-xs" /></div>
-                }
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-(--accent) line-clamp-1">{product.title || product.name}</p>
-                <p className="text-xs text-gray-400">Qty: {item.quantity}</p>
-              </div>
-              <p className="text-xs font-bold text-gray-700 shrink-0">
-                ₹{((product.price || 0) * item.quantity).toLocaleString()}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* ── Coupon section ── */}
-      <div className="border-t border-(--border-light) pt-4 mb-3">
-        {appliedCoupon ? (
-          <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-            <div className="flex items-center gap-2">
-              <FaTag className="text-green-600 text-xs" />
-              <div>
-                <p className="text-xs font-bold text-green-700 uppercase">{appliedCoupon.code}</p>
-                <p className="text-[11px] text-green-600">
-                  {appliedCoupon.discountType === "fixed"
-                    ? `₹${appliedCoupon.discountValue} off`
-                    : `${appliedCoupon.discountValue}% off`}
-                  {appliedCoupon.maximumDiscountAmount ? ` (max ₹${appliedCoupon.maximumDiscountAmount})` : ""}
-                </p>
-              </div>
-            </div>
-            <button onClick={handleRemoveCoupon} className="text-gray-400 hover:text-red-500 transition-colors ml-2">
-              <FaTimes className="text-xs" />
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <label className="block text-xs font-semibold text-gray-600">Have a coupon?</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={couponInput}
-                onChange={(e) => { setCouponInput(e.target.value.toUpperCase()); setCouponError(""); }}
-                placeholder="Enter code"
-                className="flex-1 border border-(--border-light) rounded-lg px-3 py-2 text-xs outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all uppercase"
-                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleApplyCoupon())}
-              />
-              <button
-                type="button"
-                onClick={handleApplyCoupon}
-                disabled={couponLoading || !couponInput.trim()}
-                className="px-3 py-2 bg-(--accent) text-white text-xs font-bold rounded-lg hover:bg-(--secondary) transition-colors disabled:opacity-50 whitespace-nowrap"
-              >
-                {couponLoading ? "…" : "Apply"}
-              </button>
-            </div>
-            {couponError && <p className="text-[11px] text-red-600">{couponError}</p>}
-          </div>
-        )}
-      </div>
-
-      <div className="border-t border-(--border-light) pt-3 space-y-2 text-sm">
-        <div className="flex justify-between text-gray-600">
-          <span>Subtotal</span><span>₹{subtotal.toLocaleString()}</span>
-        </div>
-        {discountAmount > 0 && (
-          <div className="flex justify-between text-green-600 font-semibold">
-            <span>Coupon discount</span><span>−₹{discountAmount.toLocaleString()}</span>
-          </div>
-        )}
-        <div className="flex justify-between text-gray-600">
-          <span>Shipping</span>
-          <span className={shipping === 0 ? "text-green-600 font-semibold" : ""}>
-            {shipping === 0 ? "FREE" : `₹${shipping}`}
-          </span>
-        </div>
-        <div className="flex justify-between font-bold text-(--accent) text-base border-t border-(--border-light) pt-2">
-          <span>Total</span><span>₹{total.toLocaleString()}</span>
-        </div>
-      </div>
-      {subtotal > 0 && subtotal < 2500 && (
-        <p className="text-[11px] text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mt-3">
-          Add ₹{(2500 - subtotal).toLocaleString()} more for free shipping
-        </p>
-      )}
-      <div className="mt-4 flex items-center gap-1.5 text-xs text-gray-400">
-        <FaTruck className="text-[10px]" />
-        <span>Estimated delivery: 3–5 business days</span>
-      </div>
-    </div>
-  );
 
   return (
     <div className="min-h-screen bg-(--surface-warm) py-8 px-4">
@@ -398,13 +382,33 @@ export default function CheckoutPage() {
                       placeholder="e.g. Mumbai"
                       className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all" />
                   </div>
+
+                  {/* ── State as a SELECT dropdown ── */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1.5">State *</label>
-                    <input type="text" required value={addr.state}
+                    <select
+                      required
+                      value={addr.state}
                       onChange={(e) => setAddr({ ...addr, state: e.target.value })}
-                      placeholder="e.g. Maharashtra"
-                      className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all" />
+                      className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all bg-white text-gray-700"
+                    >
+                      <option value="" disabled>Select your state</option>
+                      {INDIAN_STATES.map((st) => (
+                        <option key={st} value={st}>{st}</option>
+                      ))}
+                    </select>
+                    {/* live shipping hint for the selected state */}
+                    {addr.state && shippingConfig?.mode === "state" && (
+                      shippingInfo.available
+                        ? !shippingInfo.free && (
+                          <p className="text-[11px] text-gray-500 mt-1">
+                            Shipping to {addr.state}: <span className="font-semibold text-(--accent)">₹{shippingInfo.charge.toLocaleString()}</span>
+                          </p>
+                        )
+                        : <p className="text-[11px] text-red-600 mt-1">{shippingInfo.note}</p>
+                    )}
                   </div>
+
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1.5">Pincode *</label>
                     <input type="text" required pattern="\d{6}" maxLength={6} value={addr.pincode}
@@ -413,15 +417,138 @@ export default function CheckoutPage() {
                       className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all" />
                   </div>
                 </div>
-                <button type="submit" disabled={loading}
+                <button type="submit" disabled={loading || !shippingInfo.available}
                   className="w-full mt-2 py-3 bg-(--accent) text-white font-bold text-sm rounded-xl hover:bg-(--secondary) transition-colors disabled:opacity-60">
-                  {loading ? "Creating order…" : `Proceed to Payment →${discountAmount > 0 ? ` (₹${total.toLocaleString()})` : ""}`}
+                  {loading ? "Creating order…" : `Proceed to Payment → (₹${estTotal.toLocaleString()})`}
                 </button>
+                <p className="text-[11px] text-gray-400 text-center">
+                  Final amount is confirmed at payment based on server-calculated shipping & discount.
+                </p>
               </form>
             </div>
           </div>
+
+          {/* ── Order summary sidebar (estimate) ── */}
           <div className="lg:w-80 shrink-0">
-            <OrderSummary />
+            <div className="bg-white rounded-2xl border border-(--border-light) p-5 sticky top-4">
+              <h3 className="font-bold text-(--accent) mb-4 flex items-center gap-2 text-sm">
+                <FaShoppingBag /> Order Summary
+              </h3>
+              <div className="space-y-3 max-h-56 overflow-y-auto mb-4 pr-1">
+                {items.map((item) => {
+                  const product = item.product;
+                  if (!product) return null;
+                  const img = product.images?.[0];
+                  return (
+                    <div key={product._id || product} className="flex gap-3 items-center">
+                      <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                        {img
+                          ? <img src={img.url} alt={img.alt} className="w-full h-full object-cover" />
+                          : <div className="w-full h-full flex items-center justify-center text-gray-400"><FaImage className="text-xs" /></div>
+                        }
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-(--accent) line-clamp-1">{product.title || product.name}</p>
+                        <p className="text-xs text-gray-400">Qty: {item.quantity}</p>
+                      </div>
+                      <p className="text-xs font-bold text-gray-700 shrink-0">
+                        ₹{((product.price || 0) * item.quantity).toLocaleString()}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* ── Coupon section ── */}
+              <div className="border-t border-(--border-light) pt-4 mb-3">
+                {appliedCoupon ? (
+                  <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <FaTag className="text-green-600 text-xs" />
+                      <div>
+                        <p className="text-xs font-bold text-green-700 uppercase">{appliedCoupon.code}</p>
+                        <p className="text-[11px] text-green-600">
+                          {appliedCoupon.discountType === "fixed"
+                            ? `₹${appliedCoupon.discountValue} off`
+                            : `${appliedCoupon.discountValue}% off`}
+                          {appliedCoupon.maximumDiscountAmount ? ` (max ₹${appliedCoupon.maximumDiscountAmount})` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <button onClick={handleRemoveCoupon} className="text-gray-400 hover:text-red-500 transition-colors ml-2">
+                      <FaTimes className="text-xs" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-gray-600">Have a coupon?</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={couponInput}
+                        onChange={(e) => { setCouponInput(e.target.value.toUpperCase()); setCouponError(""); }}
+                        placeholder="Enter code"
+                        className="flex-1 border border-(--border-light) rounded-lg px-3 py-2 text-xs outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all uppercase"
+                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleApplyCoupon())}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleApplyCoupon}
+                        disabled={couponLoading || !couponInput.trim()}
+                        className="px-3 py-2 bg-(--accent) text-white text-xs font-bold rounded-lg hover:bg-(--secondary) transition-colors disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {couponLoading ? "…" : "Apply"}
+                      </button>
+                    </div>
+                    {couponError && <p className="text-[11px] text-red-600">{couponError}</p>}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Totals (estimate) ── */}
+              <div className="border-t border-(--border-light) pt-3 space-y-2 text-sm">
+                <div className="flex justify-between text-gray-600">
+                  <span>Subtotal</span><span>₹{subtotal.toLocaleString()}</span>
+                </div>
+                {discountAmount > 0 && (
+                  <div className="flex justify-between text-green-600 font-semibold">
+                    <span>Coupon discount</span><span>−₹{discountAmount.toLocaleString()}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-gray-600">
+                  <span>Shipping</span>
+                  {shippingInfo.pending ? (
+                    <span className="text-gray-400 text-xs">Select state</span>
+                  ) : !shippingInfo.available ? (
+                    <span className="text-red-500 text-xs">Unavailable</span>
+                  ) : (
+                    <span className={shippingInfo.charge === 0 ? "text-green-600 font-semibold" : ""}>
+                      {shippingInfo.charge === 0 ? "FREE" : `₹${shippingInfo.charge.toLocaleString()}`}
+                    </span>
+                  )}
+                </div>
+                <div className="flex justify-between font-bold text-(--accent) text-base border-t border-(--border-light) pt-2">
+                  <span>Total (est.)</span><span>₹{estTotal.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {shippingInfo.note && shippingInfo.pending && (
+                <p className="text-[11px] text-gray-400 mt-2">{shippingInfo.note}</p>
+              )}
+              {!shippingInfo.available && shippingInfo.note && (
+                <p className="text-[11px] text-red-600 bg-red-50 rounded-lg px-3 py-2 mt-3">{shippingInfo.note}</p>
+              )}
+              {remainingForFree > 0 && shippingInfo.available && (
+                <p className="text-[11px] text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mt-3">
+                  Add ₹{remainingForFree.toLocaleString()} more for free shipping
+                </p>
+              )}
+
+              <div className="mt-4 flex items-center gap-1.5 text-xs text-gray-400">
+                <FaTruck className="text-[10px]" />
+                <span>Estimated delivery: 3–5 business days</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

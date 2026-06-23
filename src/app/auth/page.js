@@ -123,6 +123,7 @@ export default function AuthPage() {
       const { user } = useAuthStore.getState();
       setTimeout(() => router.push(dashboardPath(user)), 1800);
     } catch (err) {
+       console.log("REGISTER ERROR:", err.response?.data);
       setError(err?.response?.data?.message || "Registration failed. Please try again.");
     }
   }
