@@ -14,13 +14,16 @@ import { BsGrid3X3Gap } from "react-icons/bs";
 import { MdDashboard } from "react-icons/md";
 import { useAuth } from "@/hooks/useAuth";
 import useAuthStore from "@/store/auth.store";
-
 import useCategoryStore from "@/store/category.store";
 import { useCategory } from "@/hooks/useCategory";
 import useCartStore from "@/store/cart.store";
 import { useCart } from "@/hooks/useCart";
 import useWishlistStore from "@/store/wishlist.store";
 import { useWishlist } from "@/hooks/useWishlist";
+import { useShipping } from "@/hooks/useShipping";
+import { useCoupon } from "@/hooks/useCoupon";
+import useShippingStore from "@/store/shipping.store";
+import useCouponStore from "@/store/coupon.store";
 
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -29,13 +32,17 @@ export default function Navbar() {
   const [mobileExpandCat, setMobileExpandCat] = useState(null);
   const [slideOpen, setSlideOpen] = useState(false);
   const [searchInput, setSearchInput] = useState("");
+  const [tickerIndex, setTickerIndex] = useState(0);
+  const [tickerFade, setTickerFade] = useState(true);
 
+  const tickerTimer = useRef(null);
   const closeTimer = useRef(null);
   const router = useRouter();
 
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-const { logout } = useAuth();
+  const { logout } = useAuth();
+
   const navCategories = useCategoryStore((s) => s.categories);
   const { fetchCategories } = useCategory();
   const cartItems = useCartStore((s) => s.items);
@@ -43,17 +50,101 @@ const { logout } = useAuth();
   const wishlistItems = useWishlistStore((s) => s.items);
   const { fetchWishlist } = useWishlist();
 
+  const shippingConfig = useShippingStore((s) => s.config);
+  const { fetchShipping } = useShipping();
+  const coupons = useCouponStore((s) => s.coupons);
+  const { fetchCoupons } = useCoupon();
+
   const cartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const wishlistCount = wishlistItems.length;
   const isUser = user?.role === "user";
 
   useEffect(() => {
     fetchCategories({ limit: 20 });
+    fetchShipping().catch(() => {});
+    fetchCoupons().catch(() => {});
   }, []);
 
   useEffect(() => {
     if (isAuthenticated && isUser) { fetchCart(); fetchWishlist(); }
   }, [isAuthenticated]);
+
+  const announcementMessages = (() => {
+    const msgs = [];
+    const now = new Date();
+
+    const activeCoupon = coupons
+      .filter((c) => c.isActive && new Date(c.expiresAt) > now && c.usedCount < c.useLimit)
+      .sort((a, b) => {
+        const aVal = a.discountType === "fixed" ? a.discountValue : a.discountValue * 10;
+        const bVal = b.discountType === "fixed" ? b.discountValue : b.discountValue * 10;
+        return bVal - aVal;
+      })[0];
+
+    if (activeCoupon) {
+      const offerText =
+        activeCoupon.discountType === "fixed"
+          ? `₹${activeCoupon.discountValue} OFF`
+          : `${activeCoupon.discountValue}% OFF`;
+      msgs.push({
+        icon: <FaGift className="text-[10px]" />,
+        text: (
+          <>
+            Get {offerText} | Use Code <strong>{activeCoupon.code}</strong>
+            {activeCoupon.minimumOrderAmount > 0 && (
+              <> on orders above ₹{activeCoupon.minimumOrderAmount.toLocaleString()}</>
+            )}
+          </>
+        ),
+      });
+    } else {
+      msgs.push({
+        icon: <FaGift className="text-[10px]" />,
+        text: <>Get 5% OFF on Your First Order | Use Code <strong>FIRST5</strong></>,
+      });
+    }
+
+    if (shippingConfig?.freeShippingAbove > 0) {
+      msgs.push({
+        icon: <FaTruck className="text-[10px]" />,
+        text: (
+          <>
+            Free Shipping on All Orders Above{" "}
+            <strong>₹{shippingConfig.freeShippingAbove.toLocaleString()}</strong>
+          </>
+        ),
+      });
+    } else {
+      msgs.push({
+        icon: <FaTruck className="text-[10px]" />,
+        text: <>Free Shipping on All Orders Above ₹2,500</>,
+      });
+    }
+
+    msgs.push({
+      icon: <FaStar className="text-[10px]" />,
+      text: <>Trusted by 500+ Hotels Across India</>,
+    });
+
+    msgs.push({
+      icon: <FaPhone className="text-[10px]" />,
+      text: <>Bulk Orders: <strong>93816 53268</strong></>,
+    });
+
+    return msgs;
+  })();
+
+  useEffect(() => {
+    if (announcementMessages.length <= 1) return;
+    tickerTimer.current = setInterval(() => {
+      setTickerFade(false);
+      setTimeout(() => {
+        setTickerIndex((prev) => (prev + 1) % announcementMessages.length);
+        setTickerFade(true);
+      }, 300);
+    }, 3500);
+    return () => clearInterval(tickerTimer.current);
+  }, [announcementMessages.length]);
 
   const openMenu = () => { clearTimeout(closeTimer.current); setCatOpen(true); };
   const closeMenu = () => {
@@ -80,7 +171,6 @@ const { logout } = useAuth();
   };
 
   async function handleLogout() {
-
     logout();
     setSlideOpen(false);
     router.push("/");
@@ -88,17 +178,47 @@ const { logout } = useAuth();
 
   const userInitial = user?.name?.charAt(0).toUpperCase() ?? "?";
   const firstName = user?.name?.split(" ")[0] ?? "";
+  const currentMsg = announcementMessages[tickerIndex];
 
   return (
     <nav className="w-full sticky top-0 z-50 shadow-sm">
 
       {/* ── Announcement Bar ── */}
       <div className="bg-[var(--accent)] text-[var(--primary)] text-[11px] font-medium text-center py-1.5 px-4 overflow-hidden">
-        <div className="flex items-center justify-center gap-8 whitespace-nowrap">
-          <span className="flex items-center gap-1.5"><FaGift className="text-[10px]" /> Get 5% OFF on Your First Order | Use Code <strong>FIRST5</strong></span>
-          <span className="hidden sm:flex items-center gap-1.5"><FaTruck className="text-[10px]" /> Free Shipping on All Orders Above ₹2,500</span>
-          <span className="hidden md:flex items-center gap-1.5"><FaStar className="text-[10px]" /> Trusted by 500+ Hotels Across India</span>
-          <span className="hidden lg:flex items-center gap-1.5"><FaPhone className="text-[10px]" /> Bulk Orders: 93816 53268</span>
+
+        {/* Mobile: fade ticker */}
+        <div className="flex md:hidden items-center justify-center gap-2 min-h-[18px]">
+          <span
+            className="flex items-center gap-1.5 transition-opacity duration-300"
+            style={{ opacity: tickerFade ? 1 : 0 }}
+          >
+            {currentMsg?.icon}
+            <span>{currentMsg?.text}</span>
+          </span>
+          <div className="flex gap-1 ml-2">
+            {announcementMessages.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  setTickerFade(false);
+                  setTimeout(() => { setTickerIndex(i); setTickerFade(true); }, 300);
+                }}
+                className="w-1 h-1 rounded-full transition-all"
+                style={{ background: i === tickerIndex ? "var(--primary)" : "rgba(255,255,255,0.35)" }}
+                aria-label={`Announcement ${i + 1}`}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Desktop: all inline */}
+        <div className="hidden md:flex items-center justify-center gap-8 whitespace-nowrap">
+          {announcementMessages.map((msg, i) => (
+            <span key={i} className="flex items-center gap-1.5">
+              {msg.icon}
+              {msg.text}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -176,7 +296,7 @@ const { logout } = useAuth();
         </div>
       </div>
 
-      {/* Mobile Search */}
+      {/* ── Mobile Search ── */}
       <div className="md:hidden bg-white px-4 pb-3 border-b border-[var(--border-light)]">
         <form onSubmit={handleSearch} className="flex items-center border border-(--border-light) rounded-sm overflow-hidden">
           <input
@@ -226,7 +346,6 @@ const { logout } = useAuth();
                   </div>
                 ))}
               </div>
-            
             </div>
           )}
         </div>
@@ -314,7 +433,6 @@ const { logout } = useAuth();
               <FaTimes className="text-xs" />
             </button>
 
-            {/* User header */}
             <div className="bg-[var(--accent)] px-6 pt-10 pb-8 flex flex-col items-center text-center">
               <div className="w-20 h-20 rounded-full bg-white/20 text-white text-3xl font-bold flex items-center justify-center mb-4 border-2 border-white/40 ring-4 ring-white/10">
                 {userInitial}
@@ -326,7 +444,6 @@ const { logout } = useAuth();
               </span>
             </div>
 
-            {/* Links */}
             <div className="flex-1 py-4 px-4 space-y-1">
               <Link
                 href={
@@ -349,7 +466,6 @@ const { logout } = useAuth();
               </Link>
             </div>
 
-            {/* Logout */}
             <div className="px-4 pb-6 border-t border-[var(--border-light)] pt-4">
               <button
                 onClick={handleLogout}

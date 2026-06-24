@@ -31,12 +31,13 @@ export default function CheckoutPage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const [paymentMethod, setPaymentMethod] = useState("online");
 
   const dashboardPath = user?.role === "superadmin"
     ? "/superadmin/dashboard"
     : user?.role === "admin"
-    ? "/admin/dashboard"
-    : "/user/dashboard";
+      ? "/admin/dashboard"
+      : "/user/dashboard";
 
   const items = useCartStore((s) => s.items);
   const { emptyCart } = useCart();
@@ -73,7 +74,7 @@ export default function CheckoutPage() {
 
   // fetch shipping config once
   useEffect(() => {
-    fetchShipping().catch(() => {});
+    fetchShipping().catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -202,14 +203,22 @@ export default function CheckoutPage() {
       }));
 
       // Step 1: Create the order (backend computes real subtotal/discount/shipping/total)
-      const result = await placeOrder(orderItems, addr, appliedCoupon?.code);
+      const result = await placeOrder(orderItems, addr, appliedCoupon?.code,paymentMethod);
       const order = result.order;
       setCreatedOrder(order); // <- DB values live here
+
+      if (paymentMethod === "cod") {
+        await emptyCart().catch(() => { });
+        setCreatedOrder(order);
+        setStep("success");
+        setLoading(false);
+        return;
+      }
 
       // Step 2: Load Razorpay and open payment modal
       const loaded = await loadRazorpayScript();
       if (!loaded) {
-        await emptyCart().catch(() => {});
+        await emptyCart().catch(() => { });
         router.push(`${dashboardPath}?tab=orders`);
         return;
       }
@@ -233,7 +242,7 @@ export default function CheckoutPage() {
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
             });
-            await emptyCart().catch(() => {});
+            await emptyCart().catch(() => { });
             setStep("success");
           } catch {
             setError("Payment verification failed. Your order is saved — pay from My Orders.");
@@ -242,7 +251,7 @@ export default function CheckoutPage() {
         },
         modal: {
           ondismiss: () => {
-            emptyCart().catch(() => {});
+            emptyCart().catch(() => { });
             router.push(`${dashboardPath}?tab=orders`);
             setLoading(false);
           },
@@ -251,7 +260,7 @@ export default function CheckoutPage() {
 
       const rzp = new window.Razorpay(options);
       rzp.on("payment.failed", () => {
-        emptyCart().catch(() => {});
+        emptyCart().catch(() => { });
         router.push(`${dashboardPath}?tab=orders`);
         setLoading(false);
       });
@@ -417,6 +426,94 @@ export default function CheckoutPage() {
                       className="w-full border border-(--border-light) rounded-lg px-4 py-2.5 text-sm outline-none focus:border-(--secondary) focus:ring-1 focus:ring-(--secondary) transition-all" />
                   </div>
                 </div>
+             {/* ── Payment method ── */}
+<div>
+  <label className="block text-xs font-semibold text-gray-600 mb-3">
+    Payment method
+  </label>
+  <div className="flex flex-col gap-3">
+
+    {/* Online */}
+    <label
+      className={`flex items-center gap-3 px-4 py-3.5 rounded-xl border-[1.5px] cursor-pointer transition-all
+        ${paymentMethod === "online"
+          ? "border-[#534AB7] bg-[#EEEDFE]"
+          : "border-(--border-light) bg-white hover:bg-gray-50"}`}
+    >
+      <input
+        type="radio"
+        name="paymentMethod"
+        value="online"
+        checked={paymentMethod === "online"}
+        onChange={(e) => setPaymentMethod(e.target.value)}
+        className="hidden"
+      />
+      {/* Custom radio dot */}
+      <div className={`w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center shrink-0 transition-colors
+        ${paymentMethod === "online" ? "border-[#534AB7]" : "border-gray-300"}`}>
+        {paymentMethod === "online" && (
+          <div className="w-2 h-2 rounded-full bg-[#534AB7]" />
+        )}
+      </div>
+      {/* Razorpay logo area */}
+      <div className="w-10 h-[26px] rounded-md bg-[#f0f6ff] flex items-center justify-center shrink-0 overflow-hidden px-1">
+        <span className="font-black text-[#072654] text-base leading-none">R</span>
+        <span className="font-semibold text-[#3395FF] text-[11px] leading-none">pay</span>
+      </div>
+      <div className="flex-1">
+        <p className={`text-sm font-semibold ${paymentMethod === "online" ? "text-[#3C3489]" : "text-(--accent)"}`}>
+          Online payment
+        </p>
+        <p className="text-[11px] text-gray-400">UPI · Cards · Net banking · Wallets</p>
+      </div>
+      {/* Mini card logos */}
+      <div className="flex gap-1.5 items-center shrink-0">
+        <div className="w-[26px] h-[17px] rounded bg-[#1A1F71] flex items-center justify-center">
+          <div className="w-2.5 h-[7px] bg-[#F7B600] rounded-sm" />
+        </div>
+        <div className="w-[26px] h-[17px] rounded bg-[#016FD0] flex items-center justify-center">
+          <span className="text-white text-[7px] font-bold tracking-tighter">VISA</span>
+        </div>
+      </div>
+    </label>
+
+    {/* COD */}
+    <label
+      className={`flex items-center gap-3 px-4 py-3.5 rounded-xl border-[1.5px] cursor-pointer transition-all
+        ${paymentMethod === "cod"
+          ? "border-[#534AB7] bg-[#EEEDFE]"
+          : "border-(--border-light) bg-white hover:bg-gray-50"}`}
+    >
+      <input
+        type="radio"
+        name="paymentMethod"
+        value="cod"
+        checked={paymentMethod === "cod"}
+        onChange={(e) => setPaymentMethod(e.target.value)}
+        className="hidden"
+      />
+      <div className={`w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center shrink-0 transition-colors
+        ${paymentMethod === "cod" ? "border-[#534AB7]" : "border-gray-300"}`}>
+        {paymentMethod === "cod" && (
+          <div className="w-2 h-2 rounded-full bg-[#534AB7]" />
+        )}
+      </div>
+      <div className="w-10 h-[26px] rounded-md bg-green-100 flex items-center justify-center shrink-0">
+        <FaTruck className="text-green-700 text-sm" />
+      </div>
+      <div className="flex-1">
+        <p className={`text-sm font-semibold ${paymentMethod === "cod" ? "text-[#3C3489]" : "text-(--accent)"}`}>
+          Cash on delivery
+        </p>
+        <p className="text-[11px] text-gray-400">Pay when your order arrives</p>
+      </div>
+      <span className="shrink-0 text-[11px] font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-md">
+        COD
+      </span>
+    </label>
+
+  </div>
+</div>
                 <button type="submit" disabled={loading || !shippingInfo.available}
                   className="w-full mt-2 py-3 bg-(--accent) text-white font-bold text-sm rounded-xl hover:bg-(--secondary) transition-colors disabled:opacity-60">
                   {loading ? "Creating order…" : `Proceed to Payment → (₹${estTotal.toLocaleString()})`}

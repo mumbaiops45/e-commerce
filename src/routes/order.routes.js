@@ -1,7 +1,7 @@
 import api from "@/lib/axios";
 
-export const placeOrder = async (items, shippingAddress, couponCode) => {
-  const body = { items, shippingAddress };
+export const placeOrder = async (items, shippingAddress, couponCode,  paymentMethod) => {
+  const body = { items, shippingAddress ,    paymentMethod, };
   if (couponCode) body.couponCode = couponCode;
   const res = await api.post("/orders", body);
   return res.data;
